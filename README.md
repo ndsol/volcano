@@ -19,19 +19,24 @@ Volcano is no silver bullet. These are some of the trade-offs it makes:
 
 # Getting started
 
-**1. Grab Volcano by typing:**
+### 1. Grab Volcano by typing:
 ```
 git clone https://github.com/ndsol/volcano
 ```
-On Windows, [GitHub Desktop](https://desktop.github.com/) or something similar may be helpful.
+> On Windows, choose from the [Clone or Download](archive/master.zip)
+> link, [Github Desktop](https://desktop.github.com), or a similar tool.
 
-**2. Build Volcano by typing:**
+### 2. Build Volcano by typing:
+```
+volcano/build.cmd
+```
+> On Windows: always replace `/` with `\` like this:
+>
+> `volcano\build.cmd`
 
-`volcano/build.cmd` (On Windows: always replace `/` with `\` like this: `volcano\build.cmd`)
+Note: the optional first-time setup steps are a good idea.
 
-Note that this script will have some optional first-time setup steps.
-
-**3. Run a demo**
+### 3. Run a demo
 
 # FAQ
 
@@ -39,8 +44,9 @@ Note that this script will have some optional first-time setup steps.
 
 ## Can I open an issue / submit a pull request?
 
-Yes! Please read http://www.catb.org/esr/faqs/smart-questions.html
+Yes! Ask
+[Smart Questions](http://www.catb.org/esr/faqs/smart-questions.html)
 and understand that it may be impossible to grant your wish.
-No wishing for more wishes. :)
+(No wishing for more wishes.)
 
-Please read the rules for [contributing](CONTRIBUTING.md).
+[The rules for contributing are here.](CONTRIBUTING.md)
