@@ -34,7 +34,7 @@ volcano/build.cmd
 >
 > `volcano\build.cmd`
 
-Note: the optional first-time setup steps are a good idea.
+*Note:* the optional first-time setup steps are a good idea.
 
 ### 3. Run a demo
 
@@ -50,3 +50,5 @@ and understand that it may be impossible to grant your wish.
 (No wishing for more wishes.)
 
 [The rules for contributing are here.](CONTRIBUTING.md)
+
+Copyright (c) 2017 the Volcano Authors. All rights reserved.
