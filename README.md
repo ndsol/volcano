@@ -23,7 +23,7 @@ Volcano is no silver bullet. These are some of the trade-offs it makes:
 ```
 git clone https://github.com/ndsol/volcano
 ```
-> On Windows, choose from the [Clone or Download](archive/master.zip)
+> On Windows, choose from the [Clone or Download](../../archive/master.zip)
 > link, [Github Desktop](https://desktop.github.com), or a similar tool.
 
 ### 2. Build Volcano by typing:
