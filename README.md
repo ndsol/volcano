@@ -26,6 +26,9 @@ git clone https://github.com/ndsol/volcano
 > On Windows, choose from the [Clone or Download](../../archive/master.zip)
 > link, [Github Desktop](https://desktop.github.com), or a similar tool.
 
+*Note:* [VolcanoSamples](https://github.com/ndsol/VolcanoSamples) has
+documentation for getting started with Volcano.
+
 ### 2. Build Volcano by typing:
 ```
 volcano/build.cmd
@@ -34,13 +37,19 @@ volcano/build.cmd
 >
 > `volcano\build.cmd`
 
-*Note:* the optional first-time setup steps are a good idea.
+*Note:* the optional first-time setup steps that `volcano/build.cmd` spits out
+on the terminal are a good idea.
 
 ### 3. Run a demo
 
 # FAQ
 
-## Help! I'm getting "git: command not found"
+## Build failed: vk_enum_string_helper.h:xxx: error: ‘VK_...’ was not declared
+
+This occurs when the GLFW-provided vulkan.h in `vendor/glfw/vulkan/vulkan.h` is
+located before `vendor/vulkansamples/include/vulkan/vulkan.h`. The `build.cmd`
+script patches GLFW by removing its version: run `build.cmd` again to fix this
+problem.
 
 ## Can I open an issue / submit a pull request?
 
@@ -50,5 +59,8 @@ and understand that it may be impossible to grant your wish.
 (No wishing for more wishes.)
 
 [The rules for contributing are here.](CONTRIBUTING.md)
+
+Volcano is not affiliated with or endorsed by the Khronos Group. Vulkan™ and the
+Vulkan logo are trademarks of the Khronos Group Inc.
 
 Copyright (c) 2017 the Volcano Authors. All rights reserved.

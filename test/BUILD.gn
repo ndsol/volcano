@@ -1,0 +1,37 @@
+# Copyright (c) 2017 the Volcano Authors. Licensed under GPLv3.
+
+import("../vendor/glslangValidator.gni")
+
+glslangVulkanToHeader("shaders") {
+  sources = [
+    "basic_test.vert",
+    "basic_test.frag",
+  ]
+}
+
+executable("basic_test") {
+  testonly = true
+
+  sources = [
+    "basic_test.cpp",
+  ]
+
+  # dep "skia" also pulls in -ldl, so it might *seem* like this is unused.
+  # Please do not remove libs = [ "dl" ].
+  libs = [ "dl" ]
+
+  deps = [
+    ":shaders",
+    "..:language",
+    "..:command",
+    "..:science",
+    "..:memory",
+    "//vendor/glfw",
+    "//vendor/spirv_cross",
+    "//vendor/vulkansamples:glm",
+    "//vendor/vulkansamples",
+    "../vendor/skia",
+  ]
+
+  configs -= [ "//gn:no_rtti" ]
+}

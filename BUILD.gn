@@ -1,0 +1,140 @@
+# Copyright (c) 2017 the Volcano Authors. Licensed under GPLv3.
+
+declare_args() {
+  is_skia_standalone = true
+  use_spirv_cross_reflection = true
+}
+
+config("language_config") {
+  cflags = [
+    "-Wall",
+    "-Wextra",
+    "-Wformat=2",
+    "-fstrict-aliasing",
+    "-Wstrict-aliasing",
+    "-fstrict-overflow",
+    "-Wstrict-overflow=5",
+    "-frtti",
+  ]
+  if (is_mac) {
+    cflags += [
+      "-Wno-newline-eof",
+    ]
+  } else {
+    cflags += [
+      "-Og",
+      "-ggdb",
+    ]
+  }
+}
+
+config("language_local_config") {
+  include_dirs = [ get_path_info(".", "abspath" ) ]
+}
+
+static_library("language") {
+  sources = [
+    "src/language/VkEnum.cpp",
+    "src/language/choose.cpp",
+    "src/language/debug.cpp",
+    "src/language/device.cpp",
+    "src/language/imageview.cpp",
+    "src/language/language.cpp",
+    "src/language/queues.cpp",
+    "src/language/requestqfams.cpp",
+    "src/language/swapchain.cpp",
+  ]
+
+  deps = [ "//vendor/vulkansamples:vulkan" ]
+
+  configs -= [ "//gn:no_rtti" ]
+  public_configs = [ ":language_local_config" ]
+  all_dependent_configs = [ ":language_config" ]
+  public = [
+    "src/language/language.h",
+  ]
+}
+
+static_library("command") {
+  sources = [
+    "src/command/command.cpp",
+    "src/command/fence.cpp",
+    "src/command/pipeline.cpp",
+    "src/command/render.cpp",
+    "src/command/shader.cpp",
+  ]
+
+  deps = [
+    ":language",
+    "//vendor/vulkansamples:vulkan",
+  ]
+
+  configs -= [ "//gn:no_rtti" ]
+  public_configs = [ ":language_local_config" ]
+  public = [
+    "src/command/command.h",
+  ]
+}
+
+static_library("memory") {
+  sources = [
+    "src/memory/descriptor.cpp",
+    "src/memory/memory.cpp",
+    "src/memory/layout.cpp",
+    "src/memory/sampler.cpp",
+  ]
+
+  deps = [
+    ":command",
+    ":language",
+    "//vendor/vulkansamples:vulkan",
+  ]
+
+  configs -= [ "//gn:no_rtti" ]
+  public_configs = [ ":language_local_config" ]
+  public = [
+    "src/memory/memory.h",
+  ]
+}
+
+config("science_config") {
+  if (use_spirv_cross_reflection) {
+    defines = [ "USE_SPIRV_CROSS_REFLECTION" ]
+  }
+}
+
+source_set("science") {
+  sources = [ "src/science/science.cpp" ]
+  deps = [
+    ":command",
+    ":language",
+    ":memory",
+    "//vendor/vulkansamples:vulkan",
+  ]
+  if (use_spirv_cross_reflection) {
+    sources += [ "src/science/reflect.cpp" ]
+    deps += [ "//vendor/spirv_cross" ]
+  }
+
+  configs -= [ "//gn:no_rtti" ]
+  public_configs = [
+    ":language_local_config",
+    ":science_config",
+  ]
+  public = [
+    "science.h",
+  ]
+}
+
+group("volcano") {
+  deps = [
+    ":science",
+  ]
+}
+
+group("default") {
+  testonly = true
+  deps = [
+    "test:basic_test",
+  ]
+}

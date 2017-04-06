@@ -1,0 +1,76 @@
+# Copyright (c) 2017 the Volcano Authors. Licensed under GPLv3.
+# glslangValidator compiles GLSL shader source into SPIR-V binary
+# Each file in sources must end in one of:
+#   .conf   optional config to glslangValidator
+#   .vert   for a vertex shader
+#   .tesc   for a tessellation control shader
+#   .tese   for a tessellation evaluation shader
+#   .geom   for a geometry shader
+#   .frag   for a fragment shader
+#   .comp   for a compute shader
+#
+
+# glslangVulkan: generate an output file from the name of the input file with
+# ".spv" appended. To load the generated .spv file at runtime, dynamically load
+# "gen/full/path/to/source_file.vert.spv" relative to the executable path
+# (for a source file "full/path/to/source_file.vert")
+template("glslangVulkan") {
+  forward_variables_from(invoker, "*")
+  action_foreach(target_name) {
+    outputs = [
+      target_gen_dir + "/{{source_file_part}}.spv",
+      target_gen_dir + "/struct_{{source_file_part}}.h",
+    ]
+
+    script = "//gn/vendor/glslangValidator.py"
+    args = [
+      "-V",
+      "-o",
+      "{{source_gen_dir}}/{{source_file_part}}.spv",
+      "{{source}}",
+      "{{source_gen_dir}}/struct_{{source_file_part}}.h",
+    ]
+
+    deps = [
+      "//vendor/glslang:glslangValidator",
+      "//src/tools:copyHeader",
+    ]
+    public_configs = [ "//vendor/glslang:glslangVulkan_gen_config" ]
+    #TODO: make this part of the toolchain?
+    #TODO: description = "glslangValidator {{source_file_part}}.spv"
+  }
+}
+
+# glslangVulkanToHeader: generate an output file from the name of the input
+# file with ".h" appended. To load the output file as generated *source* code
+# at *build* time, the public_config //vendor/glslang:glslang_config below will
+# add {{root_gen_dir}} to your include_dirs. Then just
+# #include "full/path/to/source.vert.h" (for "full/path/to/source.vert")
+template("glslangVulkanToHeader") {
+  forward_variables_from(invoker, "*")
+  action_foreach(target_name) {
+    outputs = [
+      target_gen_dir + "/{{source_file_part}}.h",
+      target_gen_dir + "/struct_{{source_file_part}}.h",
+    ]
+
+    script = "//gn/vendor/glslangValidator.py"
+    args = [
+      "-V",
+      "--variable-name",
+      "spv_{{source_file_part}}",
+      "-o",
+      "{{source_gen_dir}}/{{source_file_part}}.h",
+      "{{source}}",
+      "{{source_gen_dir}}/struct_{{source_file_part}}.h",
+    ]
+
+    deps = [
+      "//vendor/glslang:glslangValidator",
+      "//src/tools:copyHeader",
+    ]
+    public_configs = [ "//vendor/glslang:glslangVulkan_gen_config" ]
+    #TODO: make this part of the toolchain?
+    #TODO: description = "glslangValidator {{source_file_part}}.h"
+  }
+}

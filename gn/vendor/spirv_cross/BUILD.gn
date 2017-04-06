@@ -1,0 +1,33 @@
+# Copyright 2017 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+
+declare_args() {
+  use_spirv_cross_exceptions = false
+}
+
+config("spirv_cross_config") {
+  if (!use_spirv_cross_exceptions) {
+    defines = [ "SPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS" ]
+  }
+}
+
+source_set("compiler") {
+  sources = [
+    "spirv_cfg.cpp",
+    "spirv_cross.cpp",
+  ]
+  configs += [ ":spirv_cross_config" ]
+}
+
+source_set("compilerGLSL") {
+  sources = [ "spirv_glsl.cpp" ]
+  deps = [ ":compiler" ]
+  configs += [ ":spirv_cross_config" ]
+}
+
+group("spirv_cross") {
+  deps = [
+    ":compilerGLSL",
+  ]
+  public_configs = [ ":spirv_cross_config" ]
+}

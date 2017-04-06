@@ -1,0 +1,17 @@
+# Copyright (c) 2017 the Volcano Authors. Licensed under GPLv3.
+
+buildconfig = "//gn/BUILDCONFIG.gn"
+secondary_source = "//gn"
+
+default_args = {
+  # skia has a lot of additional code for testing and demos.
+  # vendor/skia/BUILD.gn has skia_enable_tools = is_skia_dev_build
+  # which does not apply since skia is just a dependency.
+  skia_enable_tools = false
+
+  # when is_debug = false, skia sets skia_use_system_libjpeg_turbo = true
+  # but skia's libjpeg_turbo is ahead of distro versions which causes a
+  # compiler error during build. If you *really* want to depend on the
+  # system libjpeg_turbo, you can change it here:
+  skia_use_system_libjpeg_turbo = false
+}
