@@ -42,6 +42,12 @@ on the terminal are a good idea.
 
 ### 3. Run a demo
 
+```
+ninja -C out/Debug
+curl -o basic_test.png https://avatars2.githubusercontent.com/u/26904670?v=3
+out/Debug/basic_test basic_test.png
+```
+
 # FAQ
 
 ## Build failed: vk_enum_string_helper.h:xxx: error: ‘VK_...’ was not declared

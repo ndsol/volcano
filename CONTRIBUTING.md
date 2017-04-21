@@ -90,18 +90,20 @@ Examples:
 error.
 
 Typical code blocks end up looking like
-[01glfw.cpp](01glfw.cpp):
+[01glfw.cpp](https://github.com/ndsol/volcanosamples/01glfw/01glfw.cpp):
 ```C++
-// Read compiled-in shaders from app into Vulkan.
-if (vshader->loadSPV(spv_01glfw_vert, sizeof(spv_01glfw_vert)) ||
+if (imageAvailableSemaphore.ctorError(dev) || renderSemaphore.ctorError() ||
+    // Read compiled-in shaders from app into Vulkan.
+    vshader->loadSPV(spv_01glfw_vert, sizeof(spv_01glfw_vert)) ||
     fshader->loadSPV(spv_01glfw_frag, sizeof(spv_01glfw_frag)) ||
-    // Add VkShaderModule objects to pipeline.
+    // Add VkShaderModule objects to pipeline. Build RenderPass.
     pipe.info.addShader(vshader, pass, VK_SHADER_STAGE_VERTEX_BIT) ||
     pipe.info.addShader(fshader, pass, VK_SHADER_STAGE_FRAGMENT_BIT) ||
-    // Construct RenderPass now that pipe is done.
-    pass.ctorError(cpool.dev) ||
-    // Set up language::Framebuf array for the first time.
-    onResized(cpool.dev.swapChainExtent)) {
+    pass.ctorError(dev) || cpool.ctorError(0) ||
+    // Manually set up language::Framebuf the first time.
+    // (vkCreateFramebuffer requires a valid RenderPass, and builder
+    // requires a valid CommandPool.)
+    onResized(dev.swapChainInfo.imageExtent)) {
   return 1;
 }
 ```
