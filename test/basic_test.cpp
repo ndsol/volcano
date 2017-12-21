@@ -1,9 +1,13 @@
 /* Copyright (c) 2017 the Volcano Authors. Licensed under the GPLv3.
  */
 #define GLFW_INCLUDE_VULKAN
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include <GLFW/glfw3.h>
 #include <src/command/command.h>
+#include <src/gn/vendor/skia/skiaglue.h>
 #include <src/language/VkInit.h>
 #include <src/language/VkPtr.h>
 #include <src/language/language.h>
@@ -25,13 +29,6 @@ namespace test {
 #include "test/struct_basic_test.vert.h"
 }
 
-#include "SkCanvas.h"
-#include "SkData.h"
-#include "SkImage.h"
-#include "SkImageInfo.h"
-#include "SkRefCnt.h"
-
-#include <array>
 #include <chrono>
 
 // TODO: change vsync on the fly (and it must work the same at init time)
@@ -44,51 +41,41 @@ namespace test {
 // TODO: show how to do GPU compute
 // TODO: passes, subpasses, secondary command buffers, and subpass dependencies
 
-const char* img_filename;
+const char* imgFilename = nullptr;
 
-const std::vector<test::basic_test_vert> vertices = {
-    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+const std::vector<test::st_basic_test_vert> vertices = {
+    {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+    {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+    {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+    {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
 
-    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}};
+    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}};
 
 const std::vector<uint16_t> indices = {
     0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4,
 };
 
-class SimplePipeline : public science::SwapChainResizeObserver {
+class SimplePipeline : public science::CommandPoolContainer {
  public:
-  command::RenderPass pass;
-  command::CommandPool cpool;
-  command::CommandBuilder builder;
-  science::SwapChainResizeList resizeList;
-
-  SimplePipeline(language::Instance& instance,
-                 language::SurfaceSupport queueFamily)
-      : pass(instance.at(0)),
-        cpool(instance.at(0), queueFamily),
-        builder(cpool) {
+  SimplePipeline(language::Instance& instance)
+      : CommandPoolContainer{*instance.devs.at(0)} {
     startTime = std::chrono::high_resolution_clock::now();
-  };
+  }
+
+  std::vector<command::CommandBuffer> cmdBuffers;
 
   int ctorError(GLFWwindow* window) {
-    if (cpool.ctorError(0)) {
+    if (cpool.ctorError()) {
       return 1;
     }
     glfwSetWindowUserPointer(window, this);
     glfwSetWindowSizeCallback(window, windowResized);
 
-    if (buildUniform()) {
-      return 1;
-    }
-
-    return onResized(cpool.dev, builder, cpool.dev.swapChainInfo.imageExtent);
-  };
+    return buildUniform();
+  }
 
   static void windowResized(GLFWwindow* window, int glfw_w, int glfw_h) {
     if (glfw_w == 0 || glfw_h == 0) {
@@ -97,11 +84,11 @@ class SimplePipeline : public science::SwapChainResizeObserver {
     }
     uint32_t width = glfw_w, height = glfw_h;
     SimplePipeline* self = (SimplePipeline*)glfwGetWindowUserPointer(window);
-    if (self->resizeList.syncResize(self->cpool, {width, height})) {
-      fprintf(stderr, "syncResize failed!\n");
+    if (self->onResized({width, height}, memory::ASSUME_POOL_QINDEX)) {
+      logF("onResized failed!\n");
       exit(1);
     }
-  };
+  }
 
   std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
   unsigned frameCount = 0;
@@ -115,7 +102,7 @@ class SimplePipeline : public science::SwapChainResizeObserver {
                  1000.0f;
     frameCount++;
     if (time > 1.0) {
-      fprintf(stderr, "%d fps\n", frameCount);
+      logI("%d fps\n", frameCount);
       startTime = currentTime;
       frameCount = 0;
       timeDelta++;
@@ -123,7 +110,7 @@ class SimplePipeline : public science::SwapChainResizeObserver {
     }
     time += timeDelta;
 
-    test::basic_test_vert::ubo ubo = {};
+    test::st_basic_test_vert::ubo ubo = {};
     auto model = glm::rotate(glm::mat4(), time * glm::radians(90.0f),
                              glm::vec3(0.0f, 0.0f, 1.0f));
     memcpy(&ubo.model[0][0], &model[0][0], sizeof(ubo.model));
@@ -134,7 +121,7 @@ class SimplePipeline : public science::SwapChainResizeObserver {
     memcpy(&ubo.view[0][0], &view[0][0], sizeof(ubo.view));
 
     auto proj = glm::perspective(glm::radians(45.0f), cpool.dev.aspectRatio(),
-                                0.1f, 10.0f);
+                                 0.1f, 10.0f);
 
     // convert from OpenGL where clip coordinates +Y is up
     // to Vulkan where clip coordinates +Y is down. The other OpenGL/Vulkan
@@ -150,7 +137,7 @@ class SimplePipeline : public science::SwapChainResizeObserver {
       return 1;
     }
     return 0;
-  };
+  }
 
  protected:
   science::ShaderLibrary shaders{cpool.dev};
@@ -160,12 +147,11 @@ class SimplePipeline : public science::SwapChainResizeObserver {
   memory::Buffer vertexBuffer{cpool.dev};
   memory::Buffer indexBuffer{cpool.dev};
   memory::Sampler textureSampler{cpool.dev};
-  std::unique_ptr<science::PipeBuilder> pipe0;
+  science::PipeBuilder pipe0{cpool.dev, pass};
 
   // buildUniform builds the uniform buffers, descriptor sets, and other
   // objects needed during startup.
   int buildUniform() {
-    void* mappedMem;
     language::Device& dev = cpool.dev;
 
     {
@@ -197,204 +183,92 @@ class SimplePipeline : public science::SwapChainResizeObserver {
       }
     }
 
-    if (uniform.ctorError(dev, sizeof(test::basic_test_vert::ubo))) {
+    if (uniform.ctorError(dev, sizeof(test::st_basic_test_vert::ubo))) {
       return 1;
     }
 
-    // Create textureSampler
-    // TODO: keep track of
-    // https://skia.googlesource.com/skia/+/master/src/gpu/vk/GrVkImage.h
-    // as an alternate way to create a textureSampler.
-    //
-    // TODO: use SkCodec instead of SkImage
-
-    sk_sp<SkData> data = SkData::MakeFromFileName(img_filename);
-    if (!data) {
-      fprintf(stderr, "   unable to read image \"%s\"\n", img_filename);
-      return 1;
-    }
-    sk_sp<SkImage> img = SkImage::MakeFromEncoded(data);
-    if (!img) {
-      // TODO: get exact error message from skia.
-      fprintf(stderr, "   unable to decode image \"%s\"\n", img_filename);
-      return 1;
-    }
-    VkExtent3D extent = {1, 1, 1};
-    extent.width = img->width();
-    extent.height = img->height();
-
-    // TODO: Use a VkBuffer instead:
-    // http://xlgames-inc.github.io/posts/vulkantips/
-    // TODO: can the GPU create the mip levels from a non-mipmapped image?
-    memory::Image stagingImage(dev);
-    stagingImage.info.extent = extent;
-    stagingImage.info.format = VK_FORMAT_R8G8B8A8_UNORM;
-    if (stagingImage.ctorHostCoherent(dev) || stagingImage.bindMemory(dev)) {
-      fprintf(stderr, "stagingImage.ctorError or bindMemory failed\n");
-      return 1;
-    }
-
-    VkImageSubresource subresource = {};
-    subresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    subresource.mipLevel = 0;
-    subresource.arrayLayer = 0;
-
-    VkSubresourceLayout stagingImageLayout;
-    {
-      // NOTE: vkGetImageSubresourceLayout is only valid for an image with
-      // LINEAR tiling.
-      //
-      // Vulkan Spec: "The layout of a subresource (mipLevel/arrayLayer) of an
-      // image created with linear tiling is queried by calling
-      // vkGetImageSubresourceLayout".
-      vkGetImageSubresourceLayout(dev.dev, stagingImage.vk, &subresource,
-                                  &stagingImageLayout);
-    }
-
-    if (stagingImage.mem.mmap(dev, &mappedMem)) {
-      fprintf(stderr, "stagingImageMemory.mmap() failed\n");
-      return 1;
-    }
-    SkImageInfo dstInfo =
-        SkImageInfo::Make(img->width(), img->height(), kRGBA_8888_SkColorType,
-                          kPremul_SkAlphaType);
-    if (!img->readPixels(dstInfo, mappedMem, stagingImageLayout.rowPitch, 0,
-                         0)) {
-      fprintf(stderr, "SkImage::readPixels() failed\n");
-      stagingImage.mem.munmap(dev);
-      return 1;
-    }
-    stagingImage.mem.munmap(dev);
-
+    memory::Buffer stage(cpool.dev);
+    skiaglue skGlue(cpool, textureSampler.image.info);
     textureSampler.info.magFilter = VK_FILTER_LINEAR;
     textureSampler.info.minFilter = VK_FILTER_LINEAR;
     textureSampler.info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-
-    command::CommandBuilder setup(cpool);
-    if (setup.beginOneTimeUse()) {
-      return 1;
-    }
-    if (textureSampler.ctorError(dev, setup, stagingImage)) {
-      fprintf(stderr, "sampler.copyFrom failed\n");
+    if (skGlue.loadImage(imgFilename, stage) ||
+        textureSampler.ctorError(cpool, stage, skGlue.copies)) {
       return 1;
     }
 
-    if (pipe0) {
-      fprintf(stderr, "new science::PipeBuilder can only be called once.\n");
-      return 1;
-    }
-    pipe0.reset(new science::PipeBuilder(dev, pass));
-
-    // pipe0 should be first in resizeList. SimplePipeline assumes
-    // Framebuffer attachments are already correctly resized when its
-    // onResized is called.
-    resizeList.list.emplace_back(&*pipe0);
-    resizeList.list.emplace_back(this);
-
-    if (pipe0->addDepthImage(
-            dev, pass, setup,
-            {
-                VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT,
-                VK_FORMAT_D24_UNORM_S8_UINT,
-            }) ||
-        pipe0->addVertexInput<test::basic_test_vert>()) {
+    pipe0.info().dynamicStates.emplace_back(VK_DYNAMIC_STATE_VIEWPORT);
+    pipe0.info().dynamicStates.emplace_back(VK_DYNAMIC_STATE_SCISSOR);
+    if (pipe0.addDepthImage({
+            VK_FORMAT_D32_SFLOAT,
+            VK_FORMAT_D32_SFLOAT_S8_UINT,
+            VK_FORMAT_D24_UNORM_S8_UINT,
+        }) ||
+        pipe0.addVertexInput<test::st_basic_test_vert>()) {
       return 1;
     }
 
-    if (setup.end() || setup.submit(0)) {
-      return 1;
-    }
-    vkQueueWaitIdle(cpool.q(0));
-
-    fprintf(stderr,
-            "renderPass.init: "
-            "main.vert.spv (0x%zx bytes) main.frag.spv (0x%zx bytes)\n",
-            sizeof(spv_basic_test_vert), sizeof(spv_basic_test_frag));
+    logI("main.vert.spv (0x%zx bytes) main.frag.spv (0x%zx bytes)\n",
+         sizeof(spv_basic_test_vert), sizeof(spv_basic_test_frag));
 
     auto vshader =
         shaders.load(spv_basic_test_vert, sizeof(spv_basic_test_vert));
     auto fshader =
         shaders.load(spv_basic_test_frag, sizeof(spv_basic_test_frag));
     if (!vshader || !fshader ||
-        shaders.stage(pass, *pipe0, VK_SHADER_STAGE_VERTEX_BIT, vshader) ||
-        shaders.stage(pass, *pipe0, VK_SHADER_STAGE_FRAGMENT_BIT, fshader) ||
+        shaders.stage(pass, pipe0, VK_SHADER_STAGE_VERTEX_BIT, vshader) ||
+        shaders.stage(pass, pipe0, VK_SHADER_STAGE_FRAGMENT_BIT, fshader) ||
         shaders.makeDescriptorLibrary(descriptorLibrary)) {
       return 1;
     }
 
-    descriptorSet = descriptorLibrary.makeSet(*pipe0);
+    constexpr size_t LI = 0;
+    descriptorSet = descriptorLibrary.makeSet(LI);
     if (!descriptorSet) {
-      fprintf(stderr, "descriptorLibrary.makeSet failed\n");
+      logE("descriptorLibrary.makeSet failed\n");
       return 1;
     }
+    pipe0.info().setLayouts.emplace_back(descriptorLibrary.layouts.at(LI).vk);
 
-    if (descriptorSet->write(0, {&uniform}) ||
-        descriptorSet->write(1, {&textureSampler})) {
-      return 1;
+    return descriptorSet->write(0, {&uniform}) ||
+           descriptorSet->write(1, {&textureSampler}) ||
+           onResized(cpool.dev.swapChainInfo.imageExtent,
+                     memory::ASSUME_POOL_QINDEX);
+  }
+
+  // onResizeFramebuf is called for each framebuf that needs to be resized.
+  virtual int onResizeFramebuf(VkExtent2D newSize, language::Framebuf& framebuf,
+                               size_t framebuf_i) {
+    if (framebuf_i == 0) {
+      cpool.updateBuffersAndPass(cmdBuffers, pass);
     }
+    // Patch viewport with new size.
+    VkViewport& viewport = pipe0.info().viewports.at(0);
+    viewport.width = (float)newSize.width;
+    viewport.height = (float)newSize.height;
 
-    pipe0->pipeline.info.dynamicStates.emplace_back(VK_DYNAMIC_STATE_VIEWPORT);
-    pipe0->pipeline.info.dynamicStates.emplace_back(VK_DYNAMIC_STATE_SCISSOR);
+    // Patch scissors with new size.
+    pipe0.info().scissors.at(0).extent = newSize;
 
-    if (pass.ctorError(dev)) {
+    auto& cmdBuffer = cmdBuffers.at(framebuf_i);
+    VkBuffer vertexBuffers[] = {vertexBuffer.vk};
+    VkDeviceSize offsets[] = {0};
+    if (cmdBuffer.beginSimultaneousUse() || cmdBuffer.setViewport(pass) ||
+        cmdBuffer.setScissor(pass) ||
+        cmdBuffer.beginPrimaryPass(pass, framebuf) ||
+        cmdBuffer.bindGraphicsPipelineAndDescriptors(*pipe0.pipe, 0, 1,
+                                                     &descriptorSet->vk) ||
+        cmdBuffer.bindVertexBuffers(
+            0, sizeof(vertexBuffers) / sizeof(vertexBuffers[0]), vertexBuffers,
+            offsets) ||
+        cmdBuffer.bindAndDraw(indices, indexBuffer.vk, 0 /*indexBufOffset*/) ||
+        cmdBuffer.draw(3, 1, 0, 0) || cmdBuffer.endRenderPass() ||
+        cmdBuffer.end()) {
+      logE("onResizeFramebuf: command buffer [%zu] failed\n", framebuf_i);
       return 1;
     }
     return 0;
   }
-
-  // onResized rebuilds RenderPass pass. This is done once on startup, then
-  // every time the window is resized.
-  int onResized(language::Device& dev,
-                command::CommandBuilder& unusedSetupCommands,
-                VkExtent2D oldSize) {
-    (void)oldSize;  // oldSize is not used. Silence the compiler warning.
-    auto& newSize = dev.swapChainInfo.imageExtent;
-    // CommandBuilder has a feature to manage several VkCommandBuffers. That
-    // is particularly useful when setting up per-framebuffer commands.
-    if (builder.resize(dev.framebufs.size())) {
-      return 1;
-    }
-
-    for (size_t i = 0; i < dev.framebufs.size(); i++) {
-      language::Framebuf& framebuf = dev.framebufs.at(i);
-      if (framebuf.ctorError(dev, pass.vk, newSize)) {
-        return 1;
-      }
-      // Patch pass.passBeginInfo for each framebuffer in the swapChain.
-      // (The data in passBeginInfo is copied into each distinct
-      // VkCommandBuffer, so patching it like this is ok.)
-      pass.passBeginInfo.framebuffer = framebuf.vk;
-
-      // Patch viewport.
-      VkViewport& viewport = pass.pipelines.at(0).info.viewports.at(0);
-      viewport.width = (float)newSize.width;
-      viewport.height = (float)newSize.height;
-
-      // Patch scissors.
-      pass.pipelines.at(0).info.scissors.at(0).extent = newSize;
-
-      VkBuffer vertexBuffers[] = {vertexBuffer.vk};
-      VkDeviceSize offsets[] = {0};
-
-      // Switch builder to the CommandBuilder::VkCommandBuffer[i] and rebuild
-      // the VkCommandBuffer.
-      builder.use(i);
-      if (builder.beginSimultaneousUse() || builder.setViewport(pass) ||
-          builder.setScissor(pass) || builder.beginPrimaryPass(pass) ||
-          builder.bindGraphicsPipelineAndDescriptors(pipe0->pipeline, 0, 1,
-                                                     &descriptorSet->vk) ||
-          builder.bindVertexBuffers(
-              0, sizeof(vertexBuffers) / sizeof(vertexBuffers[0]),
-              vertexBuffers, offsets) ||
-          builder.bindAndDraw(indices, indexBuffer.vk, 0 /*indexBufOffset*/) ||
-          builder.draw(3, 1, 0, 0) || builder.endRenderPass() ||
-          builder.end()) {
-        fprintf(stderr, "build: failed to recreate command buffer %zu\n", i);
-        return 1;
-      }
-    }
-    return 0;
-  };
 };
 
 namespace {  // an anonymous namespace hides its contents outside this file
@@ -426,26 +300,26 @@ int mainLoop(GLFWwindow* window, SimplePipeline& simple) {
         VK_NULL_HANDLE, &next_image_i);
     if (v != VK_SUCCESS && v != VK_SUBOPTIMAL_KHR) {
       if (v == VK_ERROR_OUT_OF_DATE_KHR) {
-        fprintf(stderr, "vkAcquireNextImageKHR: OUT_OF_DATE\n");
+        logW("vkAcquireNextImageKHR: OUT_OF_DATE\n");
         auto& extent = simple.cpool.dev.swapChainInfo.imageExtent;
         SimplePipeline::windowResized(window, extent.width, extent.height);
         continue;
       }
-      fprintf(stderr, "vkAcquireNextImageKHR returned error\n");
+      logE("vkAcquireNextImageKHR returned error\n");
       return 1;
     }
-    simple.builder.use(next_image_i);
-    if (simple.builder.submit(0, {imageAvailableSemaphore.vk},
-                              {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
-                              {renderSemaphore.vk}) ||
-        renderSemaphore.present(next_image_i)) {
+    if (simple.cmdBuffers.at(next_image_i)
+            .submit(0, {imageAvailableSemaphore.vk},
+                    {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
+                    {renderSemaphore.vk}) ||
+        renderSemaphore.present(next_image_i) || renderSemaphore.waitIdle()) {
       return 1;
     }
   }
 
   VkResult v = vkDeviceWaitIdle(simple.cpool.dev.dev);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "vkDeviceWaitIdle returned %d\n", v);
+    logE("vkDeviceWaitIdle returned %d\n", v);
     return 1;
   }
   return 0;
@@ -464,30 +338,30 @@ int runLanguage(GLFWwindow* window, VkExtent2D size) {
   if (inst.ctorError(extensions, extensionSize, createWindowSurface, window)) {
     return 1;
   }
-  fprintf(stderr, "Instance::open\n");
+  logI("Instance::open\n");
   if (inst.open(size)) {
     return 1;
   }
-  fprintf(stderr, "Instance::open done\n");
-  if (!inst.devs_size()) {
-    fprintf(stderr, "BUG: no devices created\n");
+  logI("Instance::open done\n");
+  if (!inst.devs.size()) {
+    logE("BUG: no devices created\n");
     return 1;
   }
-  auto simple = std::unique_ptr<SimplePipeline>(
-      new SimplePipeline(inst, language::GRAPHICS));
+  auto simple = std::unique_ptr<SimplePipeline>(new SimplePipeline(inst));
   return mainLoop(window, *simple);
 }
 
 void printGLFWerr(int code, const char* msg) {
-  fprintf(stderr, "glfw error %x: %s\n", code, msg);
+  logE("glfw error %x: %s\n", code, msg);
 }
 
 int runGLFW() {
   glfwInit();
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   VkExtent2D size{800, 600};
-  GLFWwindow* window = glfwCreateWindow(size.width, size.height,
-                                        "Vulkan window", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(
+      size.width, size.height, "Vulkan window",
+      nullptr /*monitor for fullscreen*/, nullptr /*context object sharing*/);
   glfwSetErrorCallback(printGLFWerr);
   int r = runLanguage(window, size);
   glfwDestroyWindow(window);
@@ -498,8 +372,9 @@ int runGLFW() {
 }  // anonymous namespace
 
 #if defined(_WIN32)
-int APIENTRY WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
-  return runGLFW();
+int APIENTRY WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int /*nCmdShow*/) {
+  imgFilename = lpCmdLine;
+  return runGLFW();  // HINSTANCE can be retrieved with GetModuleHandle(0).
 }
 #elif defined(__ANDROID__)
 void android_main(android_app* app) {
@@ -514,7 +389,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "usage: %s filename\n", argv[0]);
     return 1;
   }
-  img_filename = argv[1];
+  imgFilename = argv[1];
   return runGLFW();
 }
 #endif

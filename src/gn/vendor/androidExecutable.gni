@@ -1,0 +1,122 @@
+# Copyright (c) 2017 the Volcano Authors. Licensed under GPLv3.
+# androidExecutable is set to "executable" in a normal compile, that is,
+# the code is being built for the host. When a cross compile is detected,
+# androidExecutable is set to "shared_library" (for use by build-android.py).
+#
+# Note: the "executable" rule uses output_name = target_name,
+# but the "shared_library" rule always prefixes the output_name with "lib".
+# https://chromium.googlesource.com/chromium/src/tools/gn/+/HEAD/docs/reference.md#output_name
+#
+# For an example of how to use this template, see
+# https://github.com/ndsol/VolcanoSamples/04android/
+import("//src/gn/toolchain/android/settings.gni")
+
+declare_args() {
+  android_variants = [
+    #"arm", # arm vulkan.h is outdated.
+    "arm64",
+    "mipsel",
+    "mips64el",
+    "x86",
+    #"x64", Being tracked at https://github.com/ndsol/volcano/issues/11.
+  ]
+}
+
+if (android_variants_dir != "" && current_toolchain != host_toolchain) {
+  # Build the shared_library foreach variant. This does not build the final APK.
+  template("androidExecutable") {
+    shared_library("per_arch_$target_name") {
+      forward_variables_from(invoker, "*")
+      if (defined(configs_add)) {
+        configs += configs_add
+      }
+      if (defined(configs_del)) {
+        configs -= configs_del
+      }
+      output_dir = "$root_build_dir/$android_variants_dir/$android_app_abi"
+      output_name = target_name
+    }
+
+    # TODO: build-posix.sh does more work after this is done.
+    # Instead, make this group("libs_$target_name") and
+    # action(target_name) {
+    #   deps = [ ":libs_$target_name" ]
+    #   script = "something that does the build-posix.sh"
+    # }
+    group(target_name) {
+      deps = []
+      foreach(variant, android_variants) {
+        deps += [
+          ":per_arch_$target_name" +
+          "(//src/gn/toolchain/android:android_$variant)"
+        ]
+      }
+    }
+  }
+
+  # Copy resources into the res dir. This does not build the final APK, but
+  # at least resources are in the right place.
+  template("androidResource") {
+    group(target_name) {
+      # Silence "sources was unused before it went out of scope."
+      if (defined(invoker.sources)) {
+        unused_sources = invoker.sources
+        unused_sources = []
+      }
+      # Copy resources file using host_toolchain, below.
+      deps = [ ":host_$target_name($host_toolchain)" ]
+    }
+  }
+} else if (android_variants_dir != "" && current_os != "android") {
+  # These rules execute on host_toolchain during an android app build.
+  template("androidExecutable") {
+    # Do nothing. This is just a bunch of silencing.
+    # Silence "deps was unused before it went out of scope."
+    if (defined(invoker.deps)) {
+      unused_deps = invoker.deps
+      unused_deps = []
+    }
+    if (defined(invoker.sources)) {
+      unused_sources = invoker.sources
+      unused_sources = []
+    }
+    if (defined(target_name)) {
+      unused_target_name = target_name
+      unused_target_name = []
+    }
+  }
+
+  # Do the actual copy.
+  template("androidResource") {
+    copy("host_$target_name") {
+      forward_variables_from(invoker, "*")
+      outputs = [
+        root_build_dir +
+        "/{{source_root_relative_dir}}-droid/raw_asset/{{source_target_relative}}",
+      ]
+    }
+  }
+} else {
+  # On the host, androidExecutable is just a vanilla executable.
+  template("androidExecutable") {
+    executable(target_name) {
+      forward_variables_from(invoker, "*")
+      if (defined(configs_add)) {
+        configs += configs_add
+      }
+      if (defined(configs_del)) {
+        configs -= configs_del
+      }
+    }
+  }
+
+  # On the host, androidResource installs the data in a "res" dir relative to
+  # the executable's current location. See std::string resDir in
+  # volcanosamples/src/assimpglue.cpp.
+  template("androidResource") {
+    copy(target_name) {
+      forward_variables_from(invoker, "*")
+      outputs = [ "$root_build_dir/res/{{source_target_relative}}" ]
+    }
+  }
+}

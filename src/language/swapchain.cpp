@@ -1,5 +1,8 @@
 /* Copyright (c) 2017 the Volcano Authors. Licensed under the GPLv3.
  */
+#ifdef _WIN32
+#define NOMINMAX
+#endif
 #include "VkEnum.h"
 #include "VkInit.h"
 #include "language.h"
@@ -27,6 +30,8 @@ uint32_t calculateMinRequestedImages(const VkSurfaceCapabilitiesKHR& scap) {
 
   // Note: The GPU driver can create more than the number returned here.
   // Device::images.size() gives the actual number created by the GPU driver.
+  //
+  // https://forums.khronos.org/showthread.php/13489-Number-of-images-created-in-a-swapchain
   return imageCount;
 }
 
@@ -51,34 +56,36 @@ VkExtent2D calculateSurfaceExtend2D(const VkSurfaceCapabilitiesKHR& scap,
 
 VkSurfaceTransformFlagBitsKHR calculateSurfaceTransform(
     const VkSurfaceCapabilitiesKHR& scap) {
-  // Prefer no rotation (VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR).
-  if (scap.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) {
-    return VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-  }
+  // TODO: Is there any platform that needs to override scap.currentTransform?
+  // if (scap.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
+  //   return VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
   return scap.currentTransform;
 }
 
 }  // anonymous namespace
 
-int Device::resetSwapChain() {
+int Device::resetSwapChain(command::CommandPool& cpool, size_t poolQindex) {
   VkSurfaceCapabilitiesKHR scap;
-  VkResult v = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
-      phys, swapChainInfo.surface, &scap);
+  VkResult v = getSurfaceCapabilities(scap);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n",
-            "vkGetPhysicalDeviceSurfaceCapabilitiesKHR", v, string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkGetPhysicalDeviceSurfaceCapabilitiesKHR", v,
+         string_VkResult(v));
     return 1;
   }
 
   swapChainInfo.imageExtent =
       calculateSurfaceExtend2D(scap, swapChainInfo.imageExtent);
+  swapChainInfo.preTransform = calculateSurfaceTransform(scap);
+  swapChainInfo.minImageCount = calculateMinRequestedImages(scap);
 
   VkSwapchainCreateInfoKHR scci = swapChainInfo;
-  scci.minImageCount = calculateMinRequestedImages(scap);
-  scci.preTransform = calculateSurfaceTransform(scap);
-  scci.oldSwapchain = swapChain;
+  scci.oldSwapchain = VK_NULL_HANDLE;
+  if (swapChain) {
+    scci.oldSwapchain = swapChain;
+  }
   uint32_t qfamIndices[] = {
-      (uint32_t)getQfamI(PRESENT), (uint32_t)getQfamI(GRAPHICS),
+      (uint32_t)getQfamI(PRESENT),
+      (uint32_t)getQfamI(GRAPHICS),
   };
   if (qfamIndices[0] == qfamIndices[1]) {
     // Device queues were set up such that one QueueFamily does both
@@ -96,8 +103,7 @@ int Device::resetSwapChain() {
   VkSwapchainKHR newSwapChain;
   v = vkCreateSwapchainKHR(dev, &scci, dev.allocator, &newSwapChain);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "vkCreateSwapchainKHR", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkCreateSwapchainKHR", v, string_VkResult(v));
     return 1;
   }
   // This avoids deleting dev.swapChain until after vkCreateSwapchainKHR().
@@ -110,17 +116,10 @@ int Device::resetSwapChain() {
     return 1;
   }
 
-  framebufs.clear();
-  for (size_t i = 0; i < vkImages->size(); i++) {
-    framebufs.emplace_back(*this);
-    auto& framebuf = framebufs.back();
-    framebuf.image = vkImages->at(i);
-    if (framebuf.imageView0.ctorError(*this, framebuf.image,
-                                      scci.imageFormat)) {
-      delete vkImages;
-      return 1;
-    }
-    framebuf.attachments.emplace_back(framebuf.imageView0.vk);
+  // Update framebufs preserving existing FrameBuf elements and adding new ones.
+  if (addOrUpdateFramebufs(*vkImages, cpool, poolQindex)) {
+    delete vkImages;
+    return 1;
   }
   delete vkImages;
   return 0;

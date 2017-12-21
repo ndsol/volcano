@@ -8,8 +8,7 @@ int Semaphore::ctorError(language::Device& dev) {
   VkSemaphoreCreateInfo VkInit(sci);
   VkResult v = vkCreateSemaphore(dev.dev, &sci, nullptr, &vk);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "vkCreateSemaphore", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkCreateSemaphore", v, string_VkResult(v));
     return 1;
   }
   return 0;
@@ -26,15 +25,14 @@ int PresentSemaphore::ctorError() {
   }
   auto& qfam = dev.qfams.at(qfam_i);
   if (qfam.queues.size() < 1) {
-    fprintf(stderr, "BUG: queue family PRESENT with %zu queues\n",
-            qfam.queues.size());
+    logE("BUG: queue family PRESENT with %zu queues\n", qfam.queues.size());
     return 1;
   }
 
   // Assume that any queue in this family is acceptable.
   q = qfam.queues.back();
   return 0;
-};
+}
 
 int PresentSemaphore::present(uint32_t image_i) {
   VkSemaphore semaphores[] = {vk};
@@ -49,19 +47,26 @@ int PresentSemaphore::present(uint32_t image_i) {
 
   VkResult v = vkQueuePresentKHR(q, &presentInfo);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "vkQueuePresentKHR", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkQueuePresentKHR", v, string_VkResult(v));
     return 1;
   }
   return 0;
-};
+}
+
+int PresentSemaphore::waitIdle() {
+  VkResult v = vkQueueWaitIdle(q);
+  if (v != VK_SUCCESS) {
+    logE("%s failed: %d (%s)\n", "vkQueueWaitIdle", v, string_VkResult(v));
+    return 1;
+  }
+  return 0;
+}
 
 int Fence::ctorError(language::Device& dev) {
   VkFenceCreateInfo VkInit(fci);
   VkResult v = vkCreateFence(dev.dev, &fci, nullptr, &vk);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "vkCreateFence", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkCreateFence", v, string_VkResult(v));
     return 1;
   }
   return 0;
@@ -72,8 +77,7 @@ int Fence::reset(language::Device& dev) {
   VkResult v =
       vkResetFences(dev.dev, sizeof(fences) / sizeof(fences[0]), fences);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "vkResetFences", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkResetFences", v, string_VkResult(v));
     return 1;
   }
   return 0;
@@ -93,8 +97,7 @@ int Event::ctorError(language::Device& dev) {
   VkEventCreateInfo VkInit(eci);
   VkResult v = vkCreateEvent(dev.dev, &eci, nullptr, &vk);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "vkCreateEvent", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkCreateEvent", v, string_VkResult(v));
     return 1;
   }
   return 0;

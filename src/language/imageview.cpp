@@ -8,15 +8,15 @@
 
 namespace language {
 
-Device::~Device() {}
-
 // ImageView::ImageView() defined here to have full Device definition.
-ImageView::ImageView(Device& dev) : vk(dev.dev, vkDestroyImageView) {
+ImageView::ImageView(Device& dev) : vk{dev.dev, vkDestroyImageView} {
   vk.allocator = dev.dev.allocator;
   VkOverwrite(info);
   info.viewType = VK_IMAGE_VIEW_TYPE_2D;
   info.components = {
-      VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B,
+      VK_COMPONENT_SWIZZLE_R,
+      VK_COMPONENT_SWIZZLE_G,
+      VK_COMPONENT_SWIZZLE_B,
       VK_COMPONENT_SWIZZLE_A,
   };
   // info.subresourceRange could be set up using range1MipAndColor() in
@@ -34,46 +34,39 @@ int ImageView::ctorError(Device& dev, VkImage image, VkFormat format) {
   vk.reset();
   VkResult v = vkCreateImageView(dev.dev, &info, dev.dev.allocator, &vk);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "vkCreateImageView", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkCreateImageView", v, string_VkResult(v));
     return 1;
   }
   return 0;
 }
 
 // Framebuf::Framebuf() defined here to have full Device definition.
-Framebuf::Framebuf(Device& dev)
-    : imageView0(dev), vk(dev.dev, vkDestroyFramebuffer) {
+Framebuf::Framebuf(Device& dev) : vk{dev.dev, vkDestroyFramebuffer} {
   vk.allocator = dev.dev.allocator;
 }
 
-int Framebuf::ctorError(Device& dev, VkRenderPass renderPass, VkExtent2D size) {
+int Framebuf::ctorError(Device& dev, VkRenderPass renderPass) {
   if (!attachments.size()) {
     // Better to print this than segfault in the vulkan driver.
-    fprintf(stderr, "Framebuf::ctorError with attachments.size == 0\n");
+    logE("Framebuf::ctorError with attachments.size == 0\n");
     return 1;
   }
-  if (attachments.at(0) != imageView0.vk) {
-    // If you hit this error, it means your code removed imageView0.vk from
-    // attachments. In that case, please derive a subclass and define your
-    // own method to populate VkFramebufferCreateInfo::layers appropriately.
-    fprintf(stderr,
-            "BUG: it is probably ok to throw out imageView0, but this "
-            "code depends on imageView0.info.subresourceRange.layerCount!\n");
-    return 1;
+  std::vector<VkImageView> imageViews;
+  for (const auto& attachment : attachments) {
+    imageViews.emplace_back(attachment.vk);
   }
   VkFramebufferCreateInfo VkInit(fbci);
   fbci.renderPass = renderPass;
-  fbci.attachmentCount = attachments.size();
-  fbci.pAttachments = attachments.data();
-  fbci.width = size.width;
-  fbci.height = size.height;
-  fbci.layers = imageView0.info.subresourceRange.layerCount;
+  fbci.attachmentCount = imageViews.size();
+  fbci.pAttachments = imageViews.data();
+  fbci.width = dev.swapChainInfo.imageExtent.width;
+  fbci.height = dev.swapChainInfo.imageExtent.height;
+  fbci.layers = attachments.at(0).info.subresourceRange.layerCount;
 
+  vk.reset();
   VkResult v = vkCreateFramebuffer(dev.dev, &fbci, dev.dev.allocator, &vk);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "vkCreateFramebuffer", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkCreateFramebuffer", v, string_VkResult(v));
     return 1;
   }
   return 0;

@@ -1,7 +1,7 @@
 /* Copyright (c) 2017 the Volcano Authors. Licensed under the GPLv3.
  */
 #include <string.h>
-#include <vulkan/vulkan.h>
+#include "VkPtr.h"
 
 #pragma once
 
@@ -253,6 +253,13 @@ inline void _VkInit(VkWriteDescriptorSet& wds) {
   memset(&wds, 0, sizeof(wds));
   wds.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 }
+
+inline void _VkInit(VkMappedMemoryRange& mmr) {
+  memset(&mmr, 0, sizeof(mmr));
+  mmr.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+}
+
+inline void _VkInit(VkPushConstantRange& pcr) { memset(&pcr, 0, sizeof(pcr)); }
 
 }  // namespace internal
 }  // namespace language

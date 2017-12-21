@@ -1,0 +1,6 @@
+# Copyright (c) 2017 the Volcano Authors. Licensed under GPLv3.
+
+declare_args() {
+  subgn_path = "../../vendor/subgn"
+  volcano_prefix = "//vendor/volcano/"
+}

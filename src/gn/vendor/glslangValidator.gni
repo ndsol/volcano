@@ -1,0 +1,129 @@
+# Copyright (c) 2017 the Volcano Authors. Licensed under GPLv3.
+# glslangValidator compiles GLSL shader source into SPIR-V binary
+# Each file in sources must end in one of:
+#   .conf   optional config to glslangValidator
+#   .vert   for a vertex shader
+#   .tesc   for a tessellation control shader
+#   .tese   for a tessellation evaluation shader
+#   .geom   for a geometry shader
+#   .frag   for a fragment shader
+#   .comp   for a compute shader
+#
+import("//src/gn/vendor/subgnDefines.gni")
+
+# glslangVulkan: generate an output file from the name of the input file with
+# ".spv" appended. To load the generated .spv file at runtime, dynamically load
+# "gen/full/path/to/source_file.vert.spv" relative to the executable path
+# (for a source file "full/path/to/source_file.vert")
+template("glslangVulkan") {
+  action_foreach(target_name) {
+    forward_variables_from(invoker, "*")
+    outputs = [
+      target_gen_dir + "/{{source_file_part}}.spv",
+      target_gen_dir + "/struct_{{source_file_part}}.h",
+    ]
+    if (!defined(deps)) {
+      deps = []
+    }
+    if (!defined(host_tool_path)) {
+      if (is_android) {
+        host_tool_path = "host_$host_cpu/"
+        deps += [
+          volcano_prefix + "src/tools:copyHeader($host_toolchain)",
+          "//src/gn/vendor/glslang:glslangValidator($host_toolchain)",
+        ]
+      } else {
+        host_tool_path = "./"
+      }
+    }
+
+    script = "//src/gn/vendor/glslangValidator.py"
+    args = [
+      host_tool_path,
+      "-V",
+      "-o",
+      "{{source_gen_dir}}/{{source_file_part}}.spv",
+      "{{source}}",
+      "{{source_gen_dir}}/struct_{{source_file_part}}.h",
+    ]
+
+    # FIXME: Make host and target builds part of volcano --
+    # make the android library a part of volcano BUILD.gn.
+    if (is_android) {
+      # Prevent "Assignment had no effect" warning.
+      if (defined(copy_header) && copy_header == "foo") {
+      }
+    } else {
+      deps += [ "//src/gn/vendor/glslang:glslangValidator" ]
+
+      if (!defined(copy_header)) {
+        copy_header = "//vendor/volcano/src/tools:copyHeader"
+      }
+      # Depend on copy_header which is generally under //vendor/volcano,
+      # unless volcano is being used standalone (such as to run unit tests).
+      deps += [ copy_header ]
+    }
+
+    public_configs = [ "//src/gn/vendor/glslang:glslangVulkan_gen_config" ]
+  }
+}
+
+# glslangVulkanToHeader: generate an output file from the name of the input
+# file with ".h" appended. To load the output file as generated *source* code
+# at *build* time, the public_config //src/gn/vendor/glslang:glslang_config
+# below will add {{root_gen_dir}} to your include_dirs. Then just
+# #include "full/path/to/source.vert.h" (for "full/path/to/source.vert")
+template("glslangVulkanToHeader") {
+  action_foreach(target_name) {
+    forward_variables_from(invoker, "*")
+    outputs = [
+      target_gen_dir + "/{{source_file_part}}.h",
+      target_gen_dir + "/struct_{{source_file_part}}.h",
+    ]
+    if (!defined(deps)) {
+      deps = []
+    }
+    if (!defined(host_tool_path)) {
+      if (is_android) {
+        host_tool_path = "host_$host_cpu/"
+        deps += [
+          volcano_prefix + "src/tools:copyHeader($host_toolchain)",
+          "//src/gn/vendor/glslang:glslangValidator($host_toolchain)",
+        ]
+      } else {
+        host_tool_path = "./"
+      }
+    }
+
+    script = "//src/gn/vendor/glslangValidator.py"
+    args = [
+      host_tool_path,
+      "-V",
+      "--variable-name",
+      "spv_{{source_file_part}}",
+      "-o",
+      "{{source_gen_dir}}/{{source_file_part}}.h",
+      "{{source}}",
+      "{{source_gen_dir}}/struct_{{source_file_part}}.h",
+    ]
+
+    # FIXME: Make host and target builds part of volcano --
+    # make the android library a part of volcano BUILD.gn.
+    if (is_android) {
+      # Prevent "Assignment had no effect" warning.
+      if (defined(copy_header) && copy_header == "foo") {
+      }
+    } else {
+      deps += [ "//src/gn/vendor/glslang:glslangValidator" ]
+
+      if (!defined(copy_header)) {
+        copy_header = "//vendor/volcano/src/tools:copyHeader"
+      }
+      # Depend on copy_header which is generally under //vendor/volcano,
+      # unless volcano is being used standalone (such as to run unit tests).
+      deps += [ copy_header ]
+    }
+
+    public_configs = [ "//src/gn/vendor/glslang:glslangVulkan_gen_config" ]
+  }
+}

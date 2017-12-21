@@ -31,10 +31,8 @@ int chooseExtensions(const std::vector<std::string>& required,
     }
 
     if (!ok) {
-      fprintf(stderr,
-              "requiredExtension \"%s\": "
-              "no devices with this extension found.\n",
-              req.c_str());
+      logE("requiredExtension \"%s\": no devices with this extension found.\n",
+           req.c_str());
       r = 1;
     }
   }
@@ -58,10 +56,10 @@ int InstanceExtensionChooser::choose() {
 InstanceExtensionChooser::~InstanceExtensionChooser(){};
 
 VkFormat Device::chooseFormat(VkImageTiling tiling, VkFormatFeatureFlags flags,
-                              const std::vector<VkFormat>& choices) {
+                              const std::vector<VkFormat>& fmts) {
   switch (tiling) {
     case VK_IMAGE_TILING_LINEAR:
-      for (auto format : choices) {
+      for (auto format : fmts) {
         VkFormatProperties props = formatProperties(format);
         if ((props.linearTilingFeatures & flags) == flags) {
           return format;
@@ -70,7 +68,7 @@ VkFormat Device::chooseFormat(VkImageTiling tiling, VkFormatFeatureFlags flags,
       break;
 
     case VK_IMAGE_TILING_OPTIMAL:
-      for (auto format : choices) {
+      for (auto format : fmts) {
         VkFormatProperties props = formatProperties(format);
         if ((props.optimalTilingFeatures & flags) == flags) {
           return format;
@@ -79,14 +77,10 @@ VkFormat Device::chooseFormat(VkImageTiling tiling, VkFormatFeatureFlags flags,
       break;
 
     case VK_IMAGE_TILING_RANGE_SIZE:
-      fprintf(stderr,
-              "_RANGE_SIZE enum values are placeholders only. "
-              "This should never happen.");
+      logE("_RANGE_SIZE are only placeholders. This should never happen.");
       break;
     case VK_IMAGE_TILING_MAX_ENUM:
-      fprintf(stderr,
-              "_MAX_ENUM enum values are placeholders only. "
-              "This should never happen.");
+      logE("_MAX_ENUM are only placeholders. This should never happen.");
       break;
   }
 

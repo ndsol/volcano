@@ -2,19 +2,19 @@
 
 executable("copyHeader") {
   sources = [
-    "copyHeader.cpp",
+    "copy_header.cpp",
     "traverse.cpp",
   ]
 
   deps = [
-    "../../vendor/glslang",
-    "../../vendor/glslang:SPIRV",
-    "../../vendor/glslang:OGLCompiler",
-    "../../vendor/glslang:HLSL",
-    "../../vendor/glslang:glslang-default-resource-limits",
+    "//src/gn/vendor/glslang",
+    "//src/gn/vendor/glslang:SPIRV",
+    "//src/gn/vendor/glslang:OGLCompiler",
+    "//src/gn/vendor/glslang:HLSL",
+    "//src/gn/vendor/glslang:glslang-default-resource-limits",
   ]
 
   configs += [
-    "../../vendor/glslang:glslang_local_config",
+    "//src/gn/vendor/glslang:glslang_local_config",
   ]
 }

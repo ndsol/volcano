@@ -11,6 +11,7 @@
 #include <SPIRV/doc.h>
 #include <SPIRV/disassemble.h>
 #include <stdarg.h>
+#include <array>
 
 extern const char* binaryFileName;
 extern const char* entryPointName;
@@ -77,8 +78,8 @@ public:
                     " * THIS FILE IS AUTO-GENERATED. ANY EDITS WILL BE DISCARDED.\n"
                     " * Source file: " << sourceFile << "\n"
                     " * See glslangValidator.{gni,py} which run "
-                    "//src/tools:copyHeader. \n */\n"
-                    "typedef struct " << structName << " {\n";
+                    "src/tools:copyHeader. \n */\n"
+                    "typedef struct st_" << structName << " {\n";
                 break;
             case ModeAttributes:
                 out.debug << "\n    static std::vector<"
@@ -184,7 +185,7 @@ protected:
             if (it.foundLinkerObjects) {
                 it.out.debug << "        return attributes;\n"
                                 "    }\n"
-                                "} " << p << ";\n";
+                                "} st_" << p << ";\n";
             }
             fprintf(headerf, "%s", it.out.debug.c_str());
         }
@@ -556,12 +557,20 @@ TString TypeToCpp::toVertexInputAttributes(TString& structName) {
         delete[] buf;
     };
 
+    // Whitelist the storage qualifiers that will be included.
+    switch (qualifier.storage) {
+    case EvqVaryingIn:
+    case EvqIn:
+    case EvqInOut:
+      break;
+
+    default:
+      // All other storage qualifiers are filtered out.
+      return "";
+    }
     // Filter out all symbols that are predefined.
     bool predefined = false;
-    if (qualifier.storage == EvqVaryingOut || qualifier.storage == EvqOut ||
-        qualifier.storage == EvqUniform || qualifier.builtIn != EbvNone ||
-        type.getBasicType() == EbtVoid)
-    {
+    if (qualifier.builtIn != EbvNone || type.getBasicType() == EbtVoid) {
         return "";
     }
     result.append("/*");
@@ -658,7 +667,7 @@ TString TypeToCpp::toVertexInputAttributes(TString& structName) {
             spaces + "attr->binding = " + attrBinding + ";\n" +
             spaces + "attr->location = " + attrLocation + ";\n" +
             spaces + "attr->format = " + attrFormat + ";\n" +
-            spaces + "attr->offset = offsetof(" + structName + ", " +
+            spaces + "attr->offset = offsetof(st_" + structName + ", " +
                 fieldName + ");\n";
         result.append(attrCode);
     }

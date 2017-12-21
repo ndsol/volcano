@@ -16,9 +16,6 @@ using namespace VkEnum;
 const char VK_LAYER_LUNARG_standard_validation[] =
     "VK_LAYER_LUNARG_standard_validation";
 
-VkResult initSupportedQueues(Device& dev,
-                             std::vector<VkQueueFamilyProperties>& vkQFams);
-
 namespace {  // an anonymous namespace hides its contents outside this file
 
 int initInstance(Instance& inst,
@@ -57,18 +54,17 @@ int initInstance(Instance& inst,
 
   VkResult v = vkCreateInstance(&iinfo, inst.pAllocator, &inst.vk);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "vkCreateInstance", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkCreateInstance", v, string_VkResult(v));
     if (v == VK_ERROR_INCOMPATIBLE_DRIVER) {
-      fprintf(stderr,
-              "Most likely cause: your GPU does not support Vulkan yet.\n"
-              "You may try updating your graphics driver.\n");
+      logE(
+          "Most likely cause: your GPU does not support Vulkan yet.\n"
+          "You may try updating your graphics driver.\n");
     } else if (v == VK_ERROR_OUT_OF_HOST_MEMORY) {
-      fprintf(stderr,
-              "Primary cause: you *might* be out of memory (unlikely).\n"
-              "Secondary causes: conflicting vulkan drivers installed.\n"
-              "Secondary causes: broken driver installation.\n"
-              "You may want to search the web for more information.\n");
+      logE(
+          "Primary cause: you *might* be out of memory (unlikely).\n"
+          "Secondary causes: conflicting vulkan drivers installed.\n"
+          "Secondary causes: broken driver installation.\n"
+          "You may want to search the web for more information.\n");
     }
     return 1;
   }
@@ -86,6 +82,21 @@ Instance::Instance() {
   applicationInfo.pApplicationName = applicationName.c_str();
   applicationInfo.applicationVersion = VK_MAKE_VERSION(0, 1, 0);
   applicationInfo.pEngineName = engineName.c_str();
+
+  VkOverwrite(features);
+  // Attempt to enable, if supported, features supported by all the below.
+  // NOTE: textureCompression features are not supported by all devices, but
+  // some are supported by any one device; the app must choose a supported one:
+  // * Adreno 330 driver 26.24.512, android 7.0.
+  // * Radeon R7 200 driver 1.4.0, ubuntu 16.04 x86_64.
+  // * GeForce 840M driver 378.13.0.0, arch x86_64.
+  features.inheritedQueries = VK_TRUE;
+  features.robustBufferAccess = VK_TRUE;
+  features.samplerAnisotropy = VK_TRUE;
+  features.occlusionQueryPrecise = VK_TRUE;
+  features.textureCompressionETC2 = VK_TRUE;
+  features.textureCompressionASTC_LDR = VK_TRUE;
+  features.textureCompressionBC = VK_TRUE;
 }
 
 int Instance::ctorError(const char** requiredExtensions,
@@ -95,7 +106,7 @@ int Instance::ctorError(const char** requiredExtensions,
   InstanceExtensionChooser instanceExtensions;
   for (size_t i = 0; i < requiredExtensionCount; i++) {
     if (requiredExtensions[i] == nullptr) {
-      fprintf(stderr, "invalid requiredExtensions[%zu]\n", i);
+      logE("invalid requiredExtensions[%zu]\n", i);
       return 1;
     }
     instanceExtensions.required.emplace_back(requiredExtensions[i]);
@@ -116,9 +127,8 @@ int Instance::ctorError(const char** requiredExtensions,
 
   VkResult v = createWindowSurface(*this, window);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)",
-            "createWindowSurface (the user-provided fn)", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)", "createWindowSurface (the user-provided fn)", v,
+         string_VkResult(v));
     return 1;
   }
   surface.allocator = pAllocator;
@@ -135,10 +145,11 @@ int Instance::ctorError(const char** requiredExtensions,
 
     // Construct a new dev.
     //
-    // Be careful to also call pop_back() unless initSupportQueues()
+    // Be careful to also call pop_back() unless initSupportedQueues()
     // succeeded.
-    devs.emplace_back(surface);
-    Device& dev = devs.back();
+    devs.emplace_back(surface ? new Device{surface}
+                              : new Device{VK_NULL_HANDLE});
+    Device& dev = *devs.back();
     dev.phys = phys;
     vkGetPhysicalDeviceProperties(phys, &dev.physProp);
     vkGetPhysicalDeviceMemoryProperties(dev.phys, &dev.memProps);
@@ -156,17 +167,16 @@ int Instance::ctorError(const char** requiredExtensions,
   delete physDevs;
 
   if (devs.size() == 0) {
-    fprintf(stderr,
-            "No Vulkan-capable devices found on your system.\n"
-            "Try running vulkaninfo to troubleshoot.\n");
+    logE(
+        "No Vulkan-capable devices found on your system.\n"
+        "Try running vulkaninfo to troubleshoot.\n");
     return 1;
   }
 
   if (dbg_lvl > 0) {
-    fprintf(stderr, "%zu physical device%s:\n", devs.size(),
-            devs.size() != 1 ? "s" : "");
+    logD("%zu physical device%s:\n", devs.size(), devs.size() != 1 ? "s" : "");
     for (size_t n = 0; n < devs.size(); n++) {
-      fprintf(stderr, "  [%zu] \"%s\"\n", n, devs.at(n).physProp.deviceName);
+      logD("  [%zu] \"%s\"\n", n, devs.at(n)->physProp.deviceName);
     }
   }
   return r;

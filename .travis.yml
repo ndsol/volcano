@@ -1,0 +1,42 @@
+dist: trusty
+sudo: false
+# https://github.com/travis-ci/travis-ci/issues/6300
+# https://github.com/travis-ci/docs-travis-ci-com/pull/746/files/1951c90442f5f475270c7cf150ab989500d8a534
+addons:
+  apt:
+    sources:
+    - ubuntu-toolchain-r-test
+    - llvm-toolchain-trusty-4.0
+    packages:
+    - build-essential
+    - clang-4.0
+    - gcc-6
+    - g++-6
+    - libstdc++6-5-dbg
+    - libfontconfig1-dev
+    - libgl1-mesa-dev
+    - libglu1-mesa-dev
+    - libx11-xcb-dev
+    - libxcursor-dev
+    - libxinerama-dev
+    - libxi-dev
+    - libxrandr-dev
+    - patch
+    - pkg-config
+before_install:
+- if [ "${CC/gcc/}"   != "$CC" ]; then CC=gcc-6     && CXX=g++-6;       $CC -v; $CXX -v; fi
+- if [ "${CC/clang/}" != "$CC" ]; then CC=clang-4.0 && CXX=clang++-4.0; $CC -v; $CXX -v; fi
+git:
+  submodules: false
+language: cpp
+compiler:
+- gcc
+#- clang # disabled until https://reviews.llvm.org/D32761 lands in Travis CI
+script: export BOOTSTRAP_ON_TRAVIS_J=3 &&
+  ./build.cmd
+notifications:
+  email:
+    on_success: never
+    on_failure: always
+  slack:
+    secure: aQpxhbENA/q/q7CPQlddT3Nxjy30yanlQMZDS26ua5J2WvDyDrONtJaz04WEHZzbnuNfxOBS3t1SnDcBQfAOuVDNg7Uax4nEA5JFdTLNRlNVhLRDn6jfuziKLAIFTBOH2seDFRHW7HwchDaIfwTjg88PQW2+WAj21DNSyLGmlCv6u3ZaO4SU610yudf5nhOHjqmK4AFu+p+NjacHdrnZ+R3tXZjMxSuyYIRR0z/OmGwi20r/KpYVKeBoewOsa9Q4iPjderRX/RoNlpNkYW2rZDXW9rWhCfvtXxXtYmJZaGjF4wK+mirFdy3ZV+lAh3zsibrxFXpWcXfapuC0blzPqX2jGHGZo6lVjqzRRshRSAbfNiIjJ+VJGxZ58MAAhuVEOca+nwtYSpuSYq6omsqaKsz2nxszGrZakNIEyLxj7O6N5OKemqq94ofG8hcM2oBvT2ZsyLAwFfhGYCwOcbQKF74slnsovV5VNOPvi44gksE3foKbqDDZBbYokhIkvrbIHXbOiCO59vBkE3FMoX29Jjk11X5QGlRAUZwjIR095IS9qMCSA/EPyFhOC8n0gG24jHZx2r7pbdZQfqayg72+Tk70CR58rklgClzYRRNL8OXxWxG9OsoXj2/dGElSsaQZSZNHJtPlvhG3pJ0MdN2k5CH/A1k4bCN9bKOtL0OwybE=

@@ -1,7 +1,7 @@
 /* Copyright (c) 2017 the Volcano Authors. Licensed under the GPLv3.
  */
-#include <vulkan/vulkan.h>
 #include <vector>
+#include "VkPtr.h"
 
 #pragma once
 

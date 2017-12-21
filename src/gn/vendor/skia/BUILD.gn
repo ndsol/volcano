@@ -1,0 +1,47 @@
+# Copyright 2017 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+import("skiaTarget.gni")
+
+source_set("skia") {
+  public_configs = [ "../vulkansamples:skia_public_config" ]
+  sources = [ "skiaglue.cpp" ]
+  deps = [
+    ":gli",
+    volcano_prefix + ":command",
+    volcano_prefix + ":memory",
+    volcano_prefix + ":science",
+    "../vulkansamples:vk_format_utils",
+  ]
+  libs = [ libskia_path ]
+  if (is_win) {
+    libs += [
+      "opengl32.lib",
+    ]
+  } else {
+    libs += [
+      "fontconfig",
+      "freetype",
+      "GL",
+    ]
+  }
+}
+
+config("gli_config") {
+  include_dirs = [ volcano_prefix + "vendor/gli" ]
+  if (!is_win) {
+    cflags = [
+      "-Wno-strict-aliasing",
+      "-Wno-ignored-qualifiers",
+      "-Wno-unused-but-set-variable",
+    ]
+  }
+}
+
+# gli is a header-only library, so all this does is make sure the right include
+# directories are added to the code that lists this as a dep.
+group("gli") {
+  public_configs = [
+    ":gli_config",
+    "//src/gn/vendor/vulkansamples:glm_config",
+  ]
+}

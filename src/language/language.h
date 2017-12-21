@@ -11,9 +11,8 @@
  *
  * Note: src/language attempts to avoid needing a "whole app INI or config"
  *       solution. This avoids pulling in an unnecessary dependency.
- * TODO: Centralize logging instead of sprinkling fprintf(stderr) throughout.
  *
- * Example program:
+ * For example, the following code uses src/language to create a vulkan window:
  *
  * // this file is yourprogram.cpp:
  * #include <src/language/language.h>
@@ -44,13 +43,24 @@
  * }
  */
 
-#include <vulkan/vulkan.h>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
 #include "VkPtr.h"
 
 #pragma once
+
+namespace command {
+// Forward declaration of CommandPool for resetSwapChain().
+class CommandPool;
+// Forward declaration of Pipeline for Device.
+typedef struct Pipeline Pipeline;
+}  // namespace command
+namespace memory {
+// Forward declaration of Image for Device::depthImage.
+typedef struct Image Image;
+}  // namespace memory
 
 namespace language {
 
@@ -62,19 +72,22 @@ namespace language {
 #define WARN_UNUSED_RESULT
 #endif
 
-// For debugging src/language: set language::dbg_lvl to higher values to log
-// more detailed debug info.
+// For debugging src/language: set language::dbg_lvl to control logging at
+// runtime.
 extern int dbg_lvl;
+
 extern const char VK_LAYER_LUNARG_standard_validation[];
 
 // Forward declaration of Device for ImageView and Framebuffer.
 struct Device;
 
-// ImageView wraps VkImageView. A VkImageView is to a VkImage as a
-// VkFramebuffer is to the screen: a VkImageView accesses the memory in the
-// VkImage using a specific set of format parameters.
+// ImageView wraps VkImageView. A VkImageView is required when using a VkImage
+// to enable subresources within a single VkImage. Vulkan makes subresources and
+// aliasing (two VkImageViews that overlap) possible by making the ImageView
+// explicit.
 //
-// ImageView is set up automatically by Device. Feel free to skip to Device now.
+// ImageView is set up automatically by Device. Feel free to stop reading and
+// skip to the Device definition now.
 typedef struct ImageView {
   ImageView(Device& dev);  // ctor is in imageview.cpp for Device definition.
   ImageView(ImageView&&) = default;
@@ -92,23 +105,17 @@ typedef struct ImageView {
 // screen pixels in the application window.
 //
 // Although you do not need to use it directly, its lifecycle is:
-// 1. vector<Framebuf> framebufs are created in Device as part of
-//    Instance::ctorError(). The object contains only zeroes at this point and
-//    should not be used.
-// 2. Instance::open() calls resetSwapChain() which populates
-//    Framebuf::attachments with one VkImageView, Framebuf::imageView0 pointing
-//    to Framebuf::image. Framebuf::image is one frame buffer contained in the
-//    Device::swapChain, and Device::framebufs holds all the Framebuf objects
-//    which make up Device::swapChain.
-// 3. Your application can customize Framebuf before calling Pipeline::init().
-// 4. Your application should call Pipeline::init(), which calls
-//    Framebuf::ctorError().
-// 5. Framebuf::ctorError() consumes Framebuf::attachments.
-// 6. Later, your application may call resetSwapChain() again if the swapChain
-//    extent needs to change. This resets all Framebuf::attachments, so your
-//    application should repopulate them immediately after. Typically the
-//    attachments setup code goes in a subroutine to be called after
-//    Instance::open() and after Device::resetSwapChain().
+// 1. vector<Framebuf> framebufs are created in Instance::ctorError().
+// 2. Instance::open() calls resetSwapChain() where Framebuf::image.at(0) and
+//    Framebuf::attachments.at(0) are set and attachments.at(0).ctorError() is
+//    called.
+// 3. Your application can customize Framebuf before calling
+//    RenderPass::ctorError().
+// 4. When you call Framebuf::ctorError(), image and attachments are used to
+//    create vk.
+// 5. Later, your application may call Instance::resetSwapChain() again if the
+//    swapChain extent needs to be resized. This resizes all
+//    Framebuf::attachments.
 typedef struct Framebuf {
   Framebuf(Device& dev);  // ctor is in imageview.cpp for Device definition.
   Framebuf(Framebuf&&) = default;
@@ -116,36 +123,48 @@ typedef struct Framebuf {
 
   // ctorError() creates the VkFramebuffer, typically called from
   // Pipeline::init() in <src/command/command.h>.
-  WARN_UNUSED_RESULT int ctorError(Device& dev, VkRenderPass renderPass,
-                                   VkExtent2D size);
+  WARN_UNUSED_RESULT int ctorError(Device& dev, VkRenderPass renderPass);
 
-  // Image from Device::swapChain. VkImage has no VkDestroyImage function.
-  VkImage image;
-  ImageView imageView0;
-  // attachments must be created with identical
-  // ImageView::info.subresourceRange.layerCount.
-  std::vector<VkImageView> attachments;
+  // image.at(0) is overwritten with one VkImage from Device::swapChain in
+  // resetSwapChain(). Your application should immediately replace image.at(0)
+  // after resetSwapChain() returns if this is being overridden.
+  // Note: these VkImage are not automatically cleaned up with VkDestroyImage.
+  // Images from vkGetSwapchainImagesKHR are automatically destroyed.
+  std::vector<VkImage> image;
 
+  // attachments must all have ImageView::info.subresourceRange.layerCount be
+  // identical. resetSwapChain() overwrites attachments.at(0) with one ImageView
+  // pointing to image.at(0).
+  std::vector<ImageView> attachments;
+
+  // vk is the vulkan VkFrameBuffer object. resetSwapChain() overwrites it.
   VkPtr<VkFramebuffer> vk;
+
+  // depthImageViewAt1 indicates whether attachments.at(1) is the depth buffer.
+  // This prevents resetSwapChain() from getting confused and mistaking an
+  // application attachment in attachments.at(1) for the depthImageView.
+  bool depthImageViewAt1{false};
 } Framebuf;
 
 // SurfaceSupport encodes the result of vkGetPhysicalDeviceSurfaceSupportKHR().
 // As an exception, the GRAPHICS value is used to request a QueueFamily
 // with vk.queueFlags & VK_QUEUE_GRAPHICS_BIT in Instance::requestQfams() and
 // Device::getQfamI().
-// TODO: add COMPUTE.
+//
+// TODO: Add COMPUTE.
+// GRAPHICS and COMPUTE support are not tied to a surface, but volcano makes the
+// simplifying assumption that all these bits can be lumped together here.
 enum SurfaceSupport {
   UNDEFINED = 0,
   NONE = 1,
   PRESENT = 2,
 
-  GRAPHICS = 0x1000,  // Not used in struct QueueFamily.
+  GRAPHICS = 0x1000,  // Special case. Not used in struct QueueFamily.
 };
 
 // QueueFamily wraps VkQueueFamilyProperties. QueueFamily also gives whether the
 // QueueFamily can be used to "present" on the app surface (i.e. swap a surface
 // to the screen if surfaceSupport == PRESENT).
-// SurfaceSupport is the result of vkGetPhysicalDeviceSurfaceSupportKHR().
 typedef struct QueueFamily {
   QueueFamily(const VkQueueFamilyProperties& vk, SurfaceSupport surfaceSupport)
       : vk(vk), surfaceSupport(surfaceSupport) {}
@@ -164,12 +183,18 @@ typedef struct QueueFamily {
   std::vector<VkQueue> queues;
 } QueueFamily;
 
-// Device wraps the Vulkan logical and physical devices and a list of
-// QueueFamily supported by the physical device. When initQueues() is called,
-// Instance::devs are populated with phys and qfams, but Device::dev (the
-// logical device) and Device::qfams.queues are not populated.
+// Device is explicitly used almost everywhere. A Device is created after the
+// Vulkan driver decides you have hardware that can support Vulkan. Device has
+// lots of members (physProp, enabledFeatures, memProps, ...) to tell you what
+// exactly the device supports.
 //
-// See Instance::initQueues() which populates Device::qfams during open().
+// Device wraps both the Vulkan logical and physical devices.
+//
+// Take care to observe the notes about Device::swapChainInfo below.
+//
+// Device has a list, qfams, of QueueFamily supported by the physical devices.
+// Instance::initQueues() populates Instance::devs with Device::phys and
+// Device::qfams.
 typedef struct Device {
   Device(VkSurfaceKHR surface);
   Device(Device&&) = default;
@@ -184,6 +209,9 @@ typedef struct Device {
 
   // Properties, like device name. Populated after ctorError().
   VkPhysicalDeviceProperties physProp;
+
+  // Features, like samplerAnisotropy. Populated after ctorError().
+  VkPhysicalDeviceFeatures enabledFeatures;
 
   // Memory properties like memory type. Populated after ctorError().
   VkPhysicalDeviceMemoryProperties memProps;
@@ -237,24 +265,56 @@ typedef struct Device {
   // chooseFormat is a convenience method to select the first matching format
   // that has the given tiling and feature flags.
   // If no format meets the criteria, VK_FORMAT_UNDEFINED is returned.
-  WARN_UNUSED_RESULT VkFormat
-  chooseFormat(VkImageTiling tiling, VkFormatFeatureFlags flags,
-               const std::vector<VkFormat>& choices);
+  WARN_UNUSED_RESULT VkFormat chooseFormat(VkImageTiling tiling,
+                                           VkFormatFeatureFlags flags,
+                                           const std::vector<VkFormat>& fmts);
+
+  // getSurfaceCapabilities is a convenience method for retrieving the physical
+  // device surface info from vkGetPhysicalDeviceSurfaceCapabilitiesKHR.
+  WARN_UNUSED_RESULT VkResult
+  getSurfaceCapabilities(VkSurfaceCapabilitiesKHR& scap) {
+    return vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+        phys, swapChainInfo.surface, &scap);
+  }
 
   // open() calls resetSwapChain() so swapChain is valid after open().
   VkPtr<VkSwapchainKHR> swapChain{dev, vkDestroySwapchainKHR};
-  // framebufs is valid after resetSwapChain() and open().
+  // framebufs is populated after resetSwapChain() and open().
   std::vector<Framebuf> framebufs;
 
   // resetSwapChain() re-initializes swapChain with the updated
-  // swapChainInfo.imageExtent that should have just been populated.
-  // This recreates the framebufs vector.
-  WARN_UNUSED_RESULT virtual int resetSwapChain();
+  // swapChainInfo.imageExtent that should have just been populated. It also
+  // rewrites framebufs to match.
+  //
+  // The CommandPool and poolQindex arguments specify a queue that is used to
+  // re-setup any buffers in the new swapChain.
+  WARN_UNUSED_RESULT virtual int resetSwapChain(command::CommandPool& cpool,
+                                                size_t poolQindex);
 
   // initSurfaceFormatAndPresentMode initializes surfaceFormats and
   // presentModes. This is called by Instance::ctorError as soon as the Device
   // is created.
   WARN_UNUSED_RESULT virtual int initSurfaceFormatAndPresentMode();
+
+  // GetDepthFormat can be used to detect if addDepthImage() was ever called.
+  VkFormat GetDepthFormat() const { return depthFormat; };
+
+ protected:
+  friend struct command::Pipeline;
+  // depthFormat is set by Pipeline::addDepthImage() to communicate with
+  // resetSwapChain() and addOrUpdateFramebufs().
+  VkFormat depthFormat{VK_FORMAT_UNDEFINED};
+  // depthImage is set in addOrUpdateFramebufs(). One Image is used among all
+  // framebufs without any concurrency issues.
+  memory::Image* depthImage{nullptr};
+  // addOrUpdateFramebufs updates framebufs preserving existing FrameBuf
+  // elements and adding new ones.
+  //
+  // addOrUpdateFramebufs is defined separately from resetSwapChain because it
+  // depends on src/memory/memory.h, so the code is found in
+  // src/memory/memory.cpp.
+  int addOrUpdateFramebufs(std::vector<VkImage>& images,
+                           command::CommandPool& cpool, size_t poolQindex);
 } Device;
 
 // QueueRequest communicates the physical device within Instance, and the
@@ -293,29 +353,30 @@ typedef struct InstanceExtensionChooser {
   std::vector<std::string> chosen;
 } InstanceExtensionChooser;
 
-// Instance holds the root of the Vulkan pipeline. Constructor (ctor) is a
-// 3-phase process:
-// 1. Create an Instance object (step 1 of the constructor)
+// Instance is the root class for your application's Vulkan access.
+// Constructor (ctor) is a 3-phase process:
+// 1. Create an Instance object.
 //    Optionally customize applicationInfo.
-// 2. Call ctorError() (step 2 of the constructor)
+// 2. Call ctorError()
 //    *** Always check the error return ***
 //    ctorError() calls your CreateWindowSurfaceFn to create a VkSurfaceKHR
 //    (windowing library-specific code, up to you to choose how to implement)
 // 3. Optionally choose the number and type of queues (queue requests are how
 //    queues are created, and a device with no queues is considered ignored).
-//    Choose surface formats, extensions, or present mode. Finally,
-//    call open() (step 3 of the constructor) to finish setting up Vulkan:
+//    Choose surface formats, extensions, or present mode. To complete step 3,
+//    call open(), which finishes setting up Vulkan:
 //    surfaces, queues, and a swapChain.
 //
-// Afterward, look at src/command/command.h to display things in the swapChain.
+// Afterward, look at src/command/command.h to start displaying things.
 //
 // * Why so many steps?
 //
-// Vulkan is pretty verbose. This is an attempt to reduce the amount of
-// boilerplate needed to get up and running. The Instance contructor is just
-// the default constructor. Then ctorError() actually creates the instance,
-// populating as much as possible without any configuration. Finally, open()
-// uses all the optional settings to get to a complete swapChain.
+// Vulkan is pretty verbose. This class reduces the boilerplate A LOT to get up
+// and running. The Instance ctor sets the defaults. Then ctorError() actually
+// creates the instance, populating as much as possible. However, info your
+// application *needs* to start up is not available until ctorError() returns
+// and your application can inspect Instance::devs. Then, open() receives final
+// swapChain extent dimensions and any other settings and sets up the swapChain.
 //
 // * Some discussion about setting up queues:
 //
@@ -354,7 +415,7 @@ class Instance {
   // window is an opaque pointer used only to call this function.
   typedef VkResult (*CreateWindowSurfaceFn)(Instance& instance, void* window);
 
-  // ctorError is step 2 of the constructor (see class comments above).
+  // ctorError is step 2 of the ctor (see class comments above).
   // Vulkan errors are returned from ctorError().
   //
   // requiredExtensions is an array of strings naming any required
@@ -373,7 +434,7 @@ class Instance {
                                    CreateWindowSurfaceFn createWindowSurface,
                                    void* window);
 
-  // open() is step 3 of the constructor. Call open() after modifying
+  // open() is step 3 of the ctor. Call open() after modifying
   // Device::extensionRequests, Device::surfaceFormats, or
   // Device::presentModes.
   //
@@ -382,8 +443,8 @@ class Instance {
 
   virtual ~Instance();
 
-  size_t devs_size() const { return devs.size(); }
-  Device& at(size_t i) { return devs.at(i); }
+  // devs holds all Device instances.
+  std::vector<std::shared_ptr<Device>> devs;
 
   // requestQfams() is a convenience function. It selects the minimal
   // list of QueueFamily instances from Device dev_i and returns a
@@ -415,6 +476,11 @@ class Instance {
   std::set<SurfaceSupport> minSurfaceSupport{language::PRESENT,
                                              language::GRAPHICS};
 
+  // features enabled here will be *attempted* to be enabled on each device.
+  // Your app still must check Device::enabledFeatures for each device after
+  // calling Instance::open.
+  VkPhysicalDeviceFeatures features;
+
   // pAllocator defaults to nullptr. Your application can install a custom
   // allocator before calling ctorError().
   VkAllocationCallbacks* pAllocator = nullptr;
@@ -422,12 +488,6 @@ class Instance {
  protected:
   // Override initDebug() if your app needs different debug settings.
   WARN_UNUSED_RESULT virtual int initDebug();
-
-  // After devs is initialized in ctorError(), it must not be resized.
-  // Any operation on the vector that causes it to reallocate its storage
-  // will invalidate references held to the individual Device instances,
-  // likely causing a segfault.
-  std::vector<Device> devs;
 
   // Override initQueues() if your app needs more than one queue.
   // initQueues() should call request.push_back() for at least one
@@ -437,8 +497,13 @@ class Instance {
   // (the logical device). open() then populates Device::qfams.queues.
   WARN_UNUSED_RESULT virtual int initQueues(std::vector<QueueRequest>& request);
 
-  friend int initSupportedDevices(Instance& inst,
-                                  std::vector<VkPhysicalDevice>& physDevs);
+  // Override initSupportedQueues() if your app needs to customize surface
+  // format or present mode logic beyond what this supports.
+  //
+  // initSupportedQueues() prepares Device dev: extensions, surface format, and
+  // present mode.
+  WARN_UNUSED_RESULT virtual VkResult initSupportedQueues(
+      Device& dev, std::vector<VkQueueFamilyProperties>& vkQFams);
 };
 
 }  // namespace language

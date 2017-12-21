@@ -17,13 +17,13 @@ using namespace VkEnum;
 int Instance::initQueues(std::vector<QueueRequest>& request) {
   // Search for a single device that support minSurfaceSupport.
   bool foundQueue = false;
-  for (size_t dev_i = 0; dev_i < devs_size(); dev_i++) {
+  for (size_t dev_i = 0; dev_i < devs.size(); dev_i++) {
     auto selectedQfams = requestQfams(dev_i, minSurfaceSupport);
     foundQueue |= selectedQfams.size() > 0;
     request.insert(request.end(), selectedQfams.begin(), selectedQfams.end());
   }
   if (!foundQueue) {
-    fprintf(stderr, "Error: no device has minSurfaceSupport.\n");
+    logE("Error: no device has minSurfaceSupport.\n");
     return 1;
   }
   return 0;
@@ -50,10 +50,10 @@ int Instance::open(VkExtent2D surfaceSizeRequest) {
   }
 
   // For each device that has one or more queues requested, call
-  // vkCreateDevice() i.e. dispatch each queue request's dev_index
-  // (devs.at(dev_index)) to vkCreateDevice()
+  // vkCreateDevice() i.e. dispatch each queue request's dev_index to
+  // vkCreateDevice()
   for (const auto& kv : requested_devs) {
-    auto& dev = devs.at(kv.first);
+    auto& dev = *devs.at(kv.first);
     std::vector<VkDeviceQueueCreateInfo> allQci;
 
     // Vulkan wants the queues grouped by queue family (and also grouped by
@@ -87,10 +87,6 @@ int Instance::open(VkExtent2D surfaceSizeRequest) {
       allQci.push_back(dqci);
     }
 
-    // VkPhysicalDeviceFeatures VkInit(physDevFeatures);
-    // vkGetPhysicalDeviceFeatures(dev.phys, &physDevFeatures);
-    VkPhysicalDeviceFeatures VkInit(enabledFeatures);
-
     // Enable device layer "VK_LAYER_LUNARG_standard_validation"
     std::vector<const char*> enabledLayers;
     enabledLayers.push_back(VK_LAYER_LUNARG_standard_validation);
@@ -98,7 +94,7 @@ int Instance::open(VkExtent2D surfaceSizeRequest) {
     VkDeviceCreateInfo VkInit(dCreateInfo);
     dCreateInfo.queueCreateInfoCount = allQci.size();
     dCreateInfo.pQueueCreateInfos = allQci.data();
-    dCreateInfo.pEnabledFeatures = &enabledFeatures;
+    dCreateInfo.pEnabledFeatures = &dev.enabledFeatures;
     if (dev.extensionRequests.size()) {
       dCreateInfo.enabledExtensionCount = dev.extensionRequests.size();
       dCreateInfo.ppEnabledExtensionNames = dev.extensionRequests.data();
@@ -108,8 +104,8 @@ int Instance::open(VkExtent2D surfaceSizeRequest) {
 
     VkResult v = vkCreateDevice(dev.phys, &dCreateInfo, pAllocator, &dev.dev);
     if (v != VK_SUCCESS) {
-      fprintf(stderr, "dev_i=%zu %s failed: %d (%s)\n", (size_t)kv.first,
-              "VkCreateDevice", v, string_VkResult(v));
+      logE("dev_i=%zu %s failed: %d (%s)\n", (size_t)kv.first, "VkCreateDevice",
+           v, string_VkResult(v));
       return 1;
     }
     dev.dev.allocator = pAllocator;
@@ -118,13 +114,13 @@ int Instance::open(VkExtent2D surfaceSizeRequest) {
 
   size_t swap_chain_count = 0;
   for (const auto& kv : requested_devs) {
-    auto& dev = devs.at(kv.first);
+    auto& dev = *devs.at(kv.first);
     size_t q_count = 0;
     for (size_t q_i = 0; q_i < dev.qfams.size(); q_i++) {
       auto& qfam = dev.qfams.at(q_i);
       if (dbg_lvl && qfam.prios.size()) {
-        fprintf(stderr, "dev_i=%u q_count=%zu adding qfam[%zu] x %zu\n",
-                kv.first, q_count, q_i, qfam.prios.size());
+        logD("dev_i=%u q_count=%zu adding qfam[%zu] x %zu\n", kv.first, q_count,
+             q_i, qfam.prios.size());
       }
       // Copy the newly minted VkQueue objects into dev.qfam.queues.
       for (size_t i = 0; i < qfam.prios.size(); i++) {
@@ -133,15 +129,13 @@ int Instance::open(VkExtent2D surfaceSizeRequest) {
         q_count++;
       }
     }
-    if (q_count && dev.presentModes.size()) {
+    if (!q_count) {
+      dev.presentModes.clear();
+    } else if (dev.presentModes.size()) {
       if (swap_chain_count == 1) {
-        fprintf(stderr,
-                "Warn: A multi-GPU setup probably does not work.\n"
-                "Warn: Here be dragons.\nWarn: %s\n",
-                "https://lunarg.com/faqs/vulkan-multiple-gpus-acceleration/");
-      }
-      if (dev.resetSwapChain()) {
-        return 1;
+        logW("Warn: A multi-GPU setup probably does not work.\n");
+        logW("Warn: Here be dragons.\n");
+        logW("https://lunarg.com/faqs/vulkan-multiple-gpus-acceleration/\n");
       }
       swap_chain_count++;
     }

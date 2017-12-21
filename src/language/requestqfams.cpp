@@ -2,9 +2,9 @@
  *
  * This is Instance::requestQfams().
  */
-#include "language.h"
-
 #include <queue>
+#include <sstream>
+#include "language.h"
 
 namespace language {
 
@@ -12,9 +12,10 @@ QueueRequest::~QueueRequest(){};
 
 std::vector<QueueRequest> Instance::requestQfams(
     size_t dev_i, std::set<SurfaceSupport> support) {
-  auto& dev = devs.at(dev_i);
+  auto& dev = *devs.at(dev_i);
   if (dbg_lvl > 0) {
-    fprintf(stderr, "requestQfams(%zu):", dev_i);
+    std::ostringstream msg;
+    msg << "requestQfams(" << dev_i << "):";
     for (auto s_i = support.begin(); s_i != support.end(); s_i++) {
       auto s = *s_i;
       const char* name = "(?)";
@@ -32,9 +33,10 @@ std::vector<QueueRequest> Instance::requestQfams(
           name = "GRAPHICS";
           break;
       }
-      fprintf(stderr, " %d=%s", (int)s, name);
+      msg << " " << (int)s << "=" << name;
     }
-    fprintf(stderr, "\n");
+    auto s = msg.str();
+    logD("%s\n", s.c_str());
   }
 
   // Prioritize support provided by each dev.qfams.
@@ -73,12 +75,11 @@ std::vector<QueueRequest> Instance::requestQfams(
       }
     }
     if (dbg_lvl > 0)
-      fprintf(stderr,
-              "prio.emplace_back(dev_i=%zu q_i=%zu qsupport.size=%zu)\n", dev_i,
-              q_i, qsupport.size());
+      logD("prio.emplace_back(dev_i=%zu q_i=%zu qsupport.size=%zu)\n", dev_i,
+           q_i, qsupport.size());
     if (qsupport.size() > 0) {
       prio.emplace(dev_i, q_i, qsupport);
-      if (dbg_lvl > 0) fprintf(stderr, "prio.size=%zu now\n", prio.size());
+      if (dbg_lvl > 0) logD("prio.size=%zu now\n", prio.size());
     }
   }
 
@@ -87,32 +88,31 @@ std::vector<QueueRequest> Instance::requestQfams(
   for (auto s_i = support.begin(); s_i != support.end();) {
     auto s = *s_i;
     if (dbg_lvl > 0)
-      fprintf(stderr, "search for %d (support.size=%zu)\n", (int)s,
-              support.size());
+      logD("search for %d (support.size=%zu)\n", (int)s, support.size());
     auto prio_i = prio.begin();
     for (; prio_i != prio.end(); prio_i++) {
       if (dbg_lvl > 0)
-        fprintf(stderr, "search: consider dev_i=%zu q_i=%zu prio%zu\n",
-                prio_i->dev_i, prio_i->q_i, prio_i->support.size());
+        logD("search: consider dev_i=%zu q_i=%zu prio%zu\n", prio_i->dev_i,
+             prio_i->q_i, prio_i->support.size());
       if (prio_i->support.find(s) != prio_i->support.end()) {
         // prio_i contains s. Because prio only contains values s will have,
         // this ends the search for s.
         if (dbg_lvl > 0)
-          fprintf(stderr, "search: accept   dev_i=%zu q_i=%zu prio%zu\n",
-                  prio_i->dev_i, prio_i->q_i, prio_i->support.size());
+          logD("search: accept   dev_i=%zu q_i=%zu prio%zu\n", prio_i->dev_i,
+               prio_i->q_i, prio_i->support.size());
         break;
       }
     }
     if (prio_i == prio.end()) {
       if (dbg_lvl > 0)
-        fprintf(stderr, "search for %d (support.size=%zu) - no support found\n",
-                (int)s, support.size());
+        logD("search for %d (support.size=%zu) - no support found\n", (int)s,
+             support.size());
       s_i++;
       continue;
     }
     if (dbg_lvl > 0)
-      fprintf(stderr, "search: select dev_i=%zu q_i=%zu prio%zu\n",
-              prio_i->dev_i, prio_i->q_i, prio_i->support.size());
+      logD("search: select dev_i=%zu q_i=%zu prio%zu\n", prio_i->dev_i,
+           prio_i->q_i, prio_i->support.size());
     result.emplace_back(prio_i->dev_i, prio_i->q_i);
 
     // Remove all support needs supplied by prio_i.
@@ -120,20 +120,20 @@ std::vector<QueueRequest> Instance::requestQfams(
     for (; prio_s_i != prio_i->support.end(); prio_s_i++) {
       size_t found = support.erase(*prio_s_i);
       if (dbg_lvl > 0)
-        fprintf(stderr, "search: dev_i=%zu q_i=%zu prio%zu erased %zu\n",
-                prio_i->dev_i, prio_i->q_i, prio_i->support.size(), found);
+        logD("search: dev_i=%zu q_i=%zu prio%zu erased %zu\n", prio_i->dev_i,
+             prio_i->q_i, prio_i->support.size(), found);
       if (found) {
         s_i = support.begin();
       }
     }
   }
-  if (dbg_lvl > 0) fprintf(stderr, "result.size=%zu\n", result.size());
+  if (dbg_lvl > 0) logD("result.size=%zu\n", result.size());
   if (support.size() > 0) {
-    fprintf(stderr, "requestQfams: %zu queue families not found on dev[%zu]:\n",
-            support.size(), dev_i);
+    logW("requestQfams: %zu queue families not found on dev[%zu]:\n",
+         support.size(), dev_i);
     for (auto s_i = support.begin(); s_i != support.end(); s_i++) {
-      fprintf(stderr, "requestQfams: queue family %d not found on dev[%zu]\n",
-              (int)*s_i, dev_i);
+      logW("requestQfams: queue family %d not found on dev[%zu]\n", (int)*s_i,
+           dev_i);
     }
     result.clear();
   }
@@ -146,7 +146,7 @@ size_t Device::getQfamI(SurfaceSupport support) const {
     if (support == GRAPHICS && fam.isGraphics()) return i;
     if (support == fam.surfaceSupport) return i;
   }
-  fprintf(stderr, "getQfamI(%d): not found\n", (int)support);
+  logE("getQfamI(%d): not found\n", (int)support);
   return (size_t)-1;
 }
 

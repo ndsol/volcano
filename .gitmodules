@@ -1,20 +1,26 @@
-[submodule "buildtools"]
-	path = buildtools
-	url = https://chromium.googlesource.com/chromium/buildtools.git
 [submodule "vendor/vulkansamples"]
 	path = vendor/vulkansamples
 	url = https://github.com/LunarG/VulkanSamples.git
+	ignore = dirty
 [submodule "vendor/spirv_cross"]
 	path = vendor/spirv_cross
 	url = https://github.com/KhronosGroup/SPIRV-Cross
+	ignore = dirty
 [submodule "vendor/glslang"]
 	path = vendor/glslang
 	url = https://github.com/KhronosGroup/glslang.git
+	ignore = dirty
 [submodule "vendor/glfw"]
 	path = vendor/glfw
 	url = https://github.com/glfw/glfw.git
 	ignore = dirty
 [submodule "vendor/skia"]
 	path = vendor/skia
-	url = https://github.com/google/skia
+	url = https://github.com/ndsol/subskia
+[submodule "vendor/subgn"]
+	path = vendor/subgn
+	url = https://github.com/ndsol/subgn
+[submodule "vendor/gli"]
+	path = vendor/gli
+	url = https://github.com/g-truc/gli
 	ignore = dirty

@@ -1,8 +1,9 @@
 # Copyright (c) 2017 the Volcano Authors. Licensed under GPLv3.
 
-import("../vendor/glslangValidator.gni")
+import("//src/gn/vendor/glslangValidator.gni")
 
 glslangVulkanToHeader("shaders") {
+  copy_header = "../src/tools:copyHeader"
   sources = [
     "basic_test.vert",
     "basic_test.frag",
@@ -16,22 +17,20 @@ executable("basic_test") {
     "basic_test.cpp",
   ]
 
-  # dep "skia" also pulls in -ldl, so it might *seem* like this is unused.
-  # Please do not remove libs = [ "dl" ].
-  libs = [ "dl" ]
-
   deps = [
     ":shaders",
     "..:language",
     "..:command",
     "..:science",
     "..:memory",
-    "//vendor/glfw",
-    "//vendor/spirv_cross",
-    "//vendor/vulkansamples:glm",
-    "//vendor/vulkansamples",
-    "../vendor/skia",
+    "//src/gn/vendor/glfw",
+    "//src/gn/vendor/spirv_cross",
+    "//src/gn/vendor/vulkansamples:glm",
+    "//src/gn/vendor/vulkansamples",
+    "//src/gn/vendor/skia",
   ]
-
-  configs -= [ "//gn:no_rtti" ]
+  if (is_win) {
+    # Windows has the notion of "console" and "windowed" apps.
+    configs += [ "//src/gn/config/win:windowed" ]
+  }
 }

@@ -1,0 +1,42 @@
+# Copyright 2017 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+
+config("no_unused_parameter") {
+  cflags = [ "-Wno-unused-parameter" ]
+}
+
+config("no_strict_overflow") {
+  cflags = [ "-Wno-strict-overflow" ]
+}
+
+config("no_strict_aliasing") {
+  cflags = [ "-fno-strict-aliasing" ]
+}
+
+config("no_maybe_uninitialized") {
+  cflags = [ "-Wno-maybe-uninitialized" ]
+}
+
+config("no_unused_function") {
+  cflags = [ "-Wno-unused-function" ]
+}
+
+config("no_unused_but_set_variable") {
+  cflags = [ "-Wno-unused-but-set-variable" ]
+}
+
+config("no_unused_variable") {
+  cflags = [ "-Wno-unused-variable" ]
+}
+
+config("no_incompatible_pointer_types") {
+  cflags = [ "-Wno-incompatible-pointer-types" ]
+}
+
+config("no_type_limits") {
+  cflags = [ "-Wno-type-limits" ]
+}
+
+config("no_parentheses") {
+  cflags = [ "-Wno-parentheses" ]
+}

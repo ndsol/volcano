@@ -4,87 +4,70 @@
 
 namespace science {
 
-SwapChainResizeObserver::~SwapChainResizeObserver(){};
+CommandPoolContainer::~CommandPoolContainer(){};
 
-int PipeBuilder::addDepthImage(language::Device& dev, command::RenderPass& pass,
-                               command::CommandBuilder& builder,
-                               const std::vector<VkFormat>& formatChoices) {
-  if (depthImage.info.format != VK_FORMAT_UNDEFINED || depthImage.vk) {
-    // More advanced use cases like dynamic shadowmaps cannot use this
-    // method.
-    fprintf(stderr,
-            "addDepthImage can only be called once, "
-            "for vanilla depth testing.\n");
-    return 1;
+void ImageCopies::addSrc(memory::Image& src) {
+  for (uint32_t mipLevel = 0; mipLevel < src.info.mipLevels; mipLevel++) {
+    addSrcAtMipLevel(src, mipLevel);
+    SubresUpdate<VkImageSubresourceLayers>(back().dstSubresource)
+        .setMipLevel(mipLevel);
   }
-
-  // pass should clear the depth buffer along with any color buffers.
-  VkClearValue depthClear = {};
-  depthClear.depthStencil = {1.0f, 0};
-  pass.passBeginClearColors.emplace_back(depthClear);
-
-  // Use pipline.info.depthsci to turn on the fixed-function depthTestEnable.
-  pipeline.info.depthsci.depthTestEnable = VK_TRUE;
-  pipeline.info.depthsci.depthWriteEnable = VK_TRUE;
-
-  // Fill in depthImage.info for recreateSwapChainExtent.
-  // depthImage.info.extent is written by recreateSwapChainExtent.
-  depthImage.info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  depthImage.info.tiling = VK_IMAGE_TILING_OPTIMAL;
-  depthImage.info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-
-  depthImage.info.format = dev.chooseFormat(
-      depthImage.info.tiling, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT,
-      formatChoices);
-  if (depthImage.info.format == VK_FORMAT_UNDEFINED) {
-    fprintf(stderr,
-            "PipeBuilder::addDepthImage: "
-            "none of formatChoices chosen.\n");
-    return 1;
-  }
-
-  pipeline.info.attach.emplace_back(
-      depthImage.info.format, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-
-  return onResized(dev, builder, dev.swapChainInfo.imageExtent);
 }
 
-int PipeBuilder::onResized(language::Device& dev,
-                           command::CommandBuilder& builder,
-                           VkExtent2D unusedNewSize) {
-  (void)unusedNewSize;
-  // if addDepthImage() was called, recreate the depthImage.
-  if (depthImage.info.format != VK_FORMAT_UNDEFINED) {
-    depthImage.info.extent = {1, 1, 1};
-    depthImage.info.extent.width = dev.swapChainInfo.imageExtent.width;
-    depthImage.info.extent.height = dev.swapChainInfo.imageExtent.height;
-    if (depthImage.ctorDeviceLocal(dev) || depthImage.bindMemory(dev)) {
-      fprintf(stderr,
-              "PipeBuilder::recreateSwapChainExtent: "
-              "depthImage.ctorError failed\n");
-      return 1;
+void ImageCopies::addSrcAtMipLevel(memory::Image& src, uint32_t mipLevel) {
+  emplace_back();
+  VkImageCopy& region = back();
+  Subres(region.srcSubresource).addColor().setMipLevel(mipLevel);
+  Subres(region.dstSubresource).addColor();
+
+  region.srcOffset = {0, 0, 0};
+  region.dstOffset = {0, 0, 0};
+
+  region.extent = src.info.extent;
+  region.extent.width >>= mipLevel;
+  region.extent.height >>= mipLevel;
+}
+
+SmartCommandBuffer::~SmartCommandBuffer() {
+  if (wantAutoSubmit) {
+    if (end()) {
+      logF("~SmartCommandBuffer: end failed\n");
     }
-
-    depthImageView.info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    if (depthImageView.ctorError(dev, depthImage.vk, depthImage.info.format)) {
-      fprintf(stderr,
-              "PipeBuilder::recreateSwapChainExtent: "
-              "depthImageView.ctorError failed\n");
-      return 1;
+    if (submit(poolQindex)) {
+      logF("~SmartCommandBuffer: submit(%zu) failed\n", poolQindex);
     }
-
-    command::CommandBuilder::BarrierSet bset;
-    bset.img.emplace_back(depthImage.makeTransition(
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL));
-    depthImage.currentLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    if (builder.barrier(bset, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT)) {
-      return 1;
+  }
+  if (ctorErrorSuccess) {
+    if (cpool.unborrowOneTimeBuffer(vk)) {
+      logF("~SmartCommandBuffer: unborrowOneTimeBuffer failed\n");
     }
+  }
+  vk = VK_NULL_HANDLE;
+  if (wantAutoSubmit) {
+    VkResult v = vkQueueWaitIdle(cpool.q(poolQindex));
+    if (v != VK_SUCCESS) {
+      logF("%s failed: %d (%s)\n", "vkQueueWaitIdle", v, string_VkResult(v));
+    }
+  }
+}
 
-    for (auto& framebuf : dev.framebufs) {
-      framebuf.attachments.emplace_back(depthImageView.vk);
+int PipeBuilder::alphaBlendWithPreviousPass() {
+  // Tell pipeline to alpha blend with what is already in framebuffer.
+  auto& pipeInfo = info();
+  pipeInfo.perFramebufColorBlend.at(0) =
+      command::PipelineCreateInfo::withEnabledAlpha();
+
+  // Update the loadOp to load data from the framebuffer, instead of a CLEAR_OP.
+  for (auto& attach : pipeInfo.attach) {
+    attach.vk.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+  }
+
+  // Autodetect if the device is using a depth buffer.
+  if (dev.GetDepthFormat() != VK_FORMAT_UNDEFINED) {
+    // Match the format of the framebuf.
+    if (addDepthImage({dev.GetDepthFormat()})) {
+      logE("addDepthImage failed (trying to match framebuf format)\n");
+      return 1;
     }
   }
   return 0;

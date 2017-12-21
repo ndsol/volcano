@@ -30,6 +30,10 @@ static inline const char* string_StorageClass(spv::StorageClass sc) {
       return "AtomicCounter";
     case spv::StorageClassImage:
       return "Image";
+    case spv::StorageClassStorageBuffer:
+      return "StorageBuffer";
+    case spv::StorageClassMax:
+      break;
   }
   return "string_StorageClass(unknown)";
 }
@@ -121,6 +125,16 @@ static inline const char* string_Decoration(spv::Decoration d) {
       return "InputAttachmentIndex";
     case spv::DecorationAlignment:
       return "Alignment";
+    case spv::DecorationOverrideCoverageNV:
+      return "OverrideCoverageNV";
+    case spv::DecorationPassthroughNV:
+      return "PassthroughNV";
+    case spv::DecorationViewportRelativeNV:
+      return "ViewportRelativeNV";
+    case spv::DecorationSecondaryViewportRelativeNV:
+      return "SecondaryViewportRelativeNV";
+    case spv::DecorationMax:
+      break;
   }
   return "string_Decoration(unknown)";
 }
@@ -159,58 +173,6 @@ static inline const char* string_BaseType(spirv_cross::SPIRType::BaseType t) {
       return "Sampler";
   }
   return "string_BaseType(unknown)";
-}
-
-static inline void print_type(spirv_cross::CompilerGLSL& compiler,
-                              spirv_cross::SPIRType& t) {
-  const char* baseTypeStr = string_BaseType(t.basetype);
-  fprintf(stderr, "(%s) sizeof=%u x %u x %u", baseTypeStr, t.width, t.vecsize,
-          t.columns);
-  if (t.basetype == spirv_cross::SPIRType::Image ||
-      t.basetype == spirv_cross::SPIRType::SampledImage) {
-    fprintf(stderr, " (Image%uD)", ((unsigned)t.image.dim) + 1);
-  } else if (t.basetype == spirv_cross::SPIRType::Struct) {
-    for (size_t i = 0; i < t.member_types.size(); i++) {
-      fprintf(stderr, "\n  m[%zu]:", i);
-      auto mt = compiler.get_type(t.member_types.at(i));
-      print_type(compiler, mt);
-    }
-  }
-
-  if (t.type_alias) {
-    auto pt = compiler.get_type(t.type_alias);
-    fprintf(stderr, "\n    alias=%u:", t.type_alias);
-    print_type(compiler, pt);
-  }
-}
-
-static inline void print_resource(spirv_cross::CompilerGLSL& compiler,
-                                  const spirv_cross::Resource& res) {
-  fprintf(stderr, "  id=%u base_type_id=%u:", res.id, res.base_type_id);
-  auto bt = compiler.get_type(res.base_type_id);
-  print_type(compiler, bt);
-  auto sc = compiler.get_storage_class(res.id);
-  fprintf(stderr, "\n  id=%u storage_class=%u (%s)", res.id, (unsigned)sc,
-          string_StorageClass(sc));
-  auto mask = compiler.get_decoration_mask(res.id);
-  uint32_t dec = 0;
-  for (uint64_t i = 1; i && i <= mask; i <<= 1, dec++) {
-    if (mask & i) {
-      spv::Decoration d = (decltype(d))dec;
-      uint32_t v = compiler.get_decoration(res.id, d);
-      fprintf(stderr, " %s=%u", string_Decoration(d), v);
-    }
-  }
-  fprintf(stderr, "\n  name=\"%s\"\n", res.name.c_str());
-}
-
-static inline void print_resources(
-    const char* typeName, const std::vector<spirv_cross::Resource>& resources,
-    spirv_cross::CompilerGLSL& compiler) {
-  for (size_t i = 0; i < resources.size(); i++) {
-    fprintf(stderr, "%s[%zu]:\n", typeName, i);
-    print_resource(compiler, resources.at(i));
-  }
 }
 
 }  // namespace science

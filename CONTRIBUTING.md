@@ -37,24 +37,49 @@ The follownig design patterns help [Volcano reach its goal](README.md):
 Volcano classes follow the builder pattern:
 
 1. Provide reasonable defaults.
-1. Mutable while being constructed.
+1. Constructors only take references to parent objects.
+1. Constructors do not call methods that can return an error, and avoid calling
+   any methods in general.
+1. Use named method calls and named members, not long lists of unnamed
+   parameters to the constructor.
+1. Mutable while being built.
 1. Avoids having to choose between `throw` and `exit(1)`
-1. Can be considered immutable after the class is fully constructed.
+1. Are "sort of immutable" after the instance is built.
 
-Volcano classes occasionally break the last guideline, and can be mutated after
-the class is fully constructed. Some Vulkan APIs necessitate this, and rather
-than create a lot of duplicate objects, Volcano follows Vulkan:
+By using constructors with only parent object references, the constructor call
+is easy to read.
 
-* `vkCreateSwapchainKHR` and `vkCreateFramebuffer` must be called repeatedly
-  with slightly different parameters (`onResize` methods do this).
-* Pipeline derivatives
-* `language::Instance` marshalling devices, the swapchain, and queues. Without
-  losing either flexibility or simplicity, the constructor is split into: (1)
-  the C++ constructor, (2) `ctorError`, and (3) `open`.
+Not putting method calls in constructors avoids having to choose between `throw`
+and `exit(1)`.
 
-Because Vulkan always makies a deep copy of any data passed as a function
-argument, Vulkan objects are *de facto* immutable, even in the cases where
-Volcano does not use `const` to enforce it statically.
+Initialization happens after the constructor. (This does not technically break
+the RAII principle.) Using named method calls and named members also makes code
+more future-proof if additional members are added. It can even make code
+backward-compatible. Best of all, named methods and members are much easier to
+read and debug.
+
+The call to `ctorError` builds the instance from the data provided in methods
+and members. When it returns, the instance is done, built, "sort of immutable,"
+and should be destroyed if a different setup is needed.
+
+The "sort of immutable" status is a quirk of Vulkan: some Vulkan APIs allow
+mutable objects to avoid excessive duplication:
+
+1. `vkCreateSwapchainKHR` and `vkCreateFramebuffer` may be required at any time
+   while the app is running. A window resize changes only a few parameters, thus
+   instead of destroying the `language::Device`, the `resetSwapChain` method
+   mutates the current `Device`.
+1. When `language::Instance` is marshalling devices, the swapchain, and queues,
+   a tradeoff to maintain flexibility and simplicity is to require three method
+   calls:
+   1. the C++ constructor
+   1.`ctorError`
+   1.`open`
+1. Pipeline derivatives
+
+Because Vulkan always makies a deep copy of any data passed to a function,
+Vulkan objects are *de facto* immutable, even if the Volcano members are later
+mutated.
 
 #### Having to choose between `throw` and `exit(1)`
 
@@ -62,18 +87,8 @@ Since some applications disable exceptions to reduce total binary size,
 [Volcano](https://github.com/ndsol/volcano) does not use exceptions. It will
 work with code that uses exceptions or code that does not.
 
-For error handling, the code that would otherwise be in the constructor is moved
-to a `ctorError` method. Thus the caller:
-
-1. Constructs something (which has reasonable defaults that make it usable
-   "out of the box")
-1. Optionally mutates it through public members (carefully check the class
-   comments for more information)
-1. Finalizes the class by calling `ctorError`, and
-1. Checks the return value of `ctorError`.
-
-If that code was all placed in the constructor, the only choices would be to
-`throw` or call `exit(1)` on an error.
+Any method that might return an error must be called in `ctorError`. Avoid
+calling methods in the constructor if at all possible.
 
 ### 2. Avoid Premature Optimization
 
@@ -90,23 +105,24 @@ Examples:
 error.
 
 Typical code blocks end up looking like
-[01glfw.cpp](01glfw.cpp):
+[01glfw.cpp](https://github.com/ndsol/volcanosamples/01glfw/01glfw.cpp):
 ```C++
-// Read compiled-in shaders from app into Vulkan.
-if (vshader->loadSPV(spv_01glfw_vert, sizeof(spv_01glfw_vert)) ||
+if (cpool.ctorError() || imageAvailableSemaphore.ctorError(dev) ||
+    renderSemaphore.ctorError() ||
+    // Read compiled-in shaders from app into Vulkan.
+    vshader->loadSPV(spv_01glfw_vert, sizeof(spv_01glfw_vert)) ||
     fshader->loadSPV(spv_01glfw_frag, sizeof(spv_01glfw_frag)) ||
-    // Add VkShaderModule objects to pipeline.
-    pipe.info.addShader(vshader, pass, VK_SHADER_STAGE_VERTEX_BIT) ||
-    pipe.info.addShader(fshader, pass, VK_SHADER_STAGE_FRAGMENT_BIT) ||
-    // Construct RenderPass now that pipe is done.
-    pass.ctorError(cpool.dev) ||
-    // Set up language::Framebuf array for the first time.
-    onResized(cpool.dev.swapChainExtent)) {
+    // Add VkShaderModule objects to pipeline. Build RenderPass.
+    pipe0->info.addShader(vshader, pass, VK_SHADER_STAGE_VERTEX_BIT) ||
+    pipe0->info.addShader(fshader, pass, VK_SHADER_STAGE_FRAGMENT_BIT) ||
+    // Manually resize language::Framebuf the first time.
+    onResized(dev.swapChainInfo.imageExtent)) {
   return 1;
 }
 ```
-This type of error checking could still be considered "simple, short, and
-sweet."
+This code can still be considered "simple, short, and sweet." The liberal use
+of comments keeps terms of the `if ()` statement from piling up on one line.
+Avoid grouping too many unrelated method calls in a single `if ()` statement.
 
 ### 3. Use Raw Vulkan Types Rarely
 
@@ -156,19 +172,23 @@ pull request, follow these steps to avoid merge conflicts in submodules:
 1. `cd` to the top level Volcano directory.
 1. `cd vendor/glfw`
 1. `git checkout -- .` # silently erase any changes made in this dir
-1. `cd ../../vendor/skia`
+1. `cd ../../vendor/vulkansamples`
 1. `git checkout -- .` # silently erase any changes made in this dir
+1. `cd ../../vendor/spirv_cross`
+1. `git checkout -- .` # silently erase any changes made in this dir
+1. `cd ../..`
 1. Now get the latest updates: (or some people use `git pull`)
    ```
    git fetch
    git merge
    ```
-1. Rebuild with `build.cmd` (this will re-patch glfw and skia)
+1. Rebuild with `build.cmd` (This automatically puts the patches back into
+   vendor/glfw, vendor/vulkansamples, and vendor/spirv_cross.)
 
 ### How do I use *clang-format*?
 
-clang-format is installed with `depot_tools`, one of the first-time build
-setup steps that `volcano/build.cmd` handles.
+`clang-format` will automatically reformat files to the required style for a
+pull request.
 
 * **Recommended**: your text editor can run **clang-format** automatically:
   [Instructions](https://clang.llvm.org/docs/ClangFormat.html).
@@ -183,21 +203,8 @@ setup steps that `volcano/build.cmd` handles.
   * Unix-like OSes: `bash: clang-format: command not found`
   * Windows: `'clang-format' is not recognized as an internal or external command`
 
-**Then** `depot_tools` was not installed correctly by `volcano/build.cmd`.
-
-------
-
-* **If you get this error:**
-```
-Problem while looking for clang-format in Chromium source tree:
-File does not exist: .../volcano/buildtools/$OS/clang-format
-```
-
-**Then** run `volcano/build.cmd` again. The
-[buildtools](https://chromium.googlesource.com/chromium/buildtools.git)
-repo may have a broken link for clang-format on your OS.
-Please also alert the Volcano Authors. This repo may be able to use a different
-`buildtools` commit hash that fixes the problem.
+**Then** `clang-format` was not installed correctly. Please run
+`volcano/build.cmd` to diagnose the problem.
 
 ### How does Volcano compare to `vulkan.hpp`?
 

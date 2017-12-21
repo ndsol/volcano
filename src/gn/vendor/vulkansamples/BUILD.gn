@@ -1,0 +1,678 @@
+# Copyright 2017 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+import("//src/gn/toolchain/android/settings.gni")
+import("//src/gn/vendor/androidExecutable.gni")
+import("//src/gn/vendor/subgnDefines.gni")
+import("//src/gn/toolchain/win/settings.gni")
+
+declare_args() {
+  is_xcb_enabled = is_linux
+  is_xlib_enabled = is_linux
+  is_wayland_enabled = false
+
+  vulkan_api_major = 1
+  use_vulkan_layers = true
+  vulkan_install_dir = "$root_gen_dir/../vulkan"
+  vulkansamples = rebase_path(volcano_prefix + "vendor/vulkansamples", ".",
+                              rebase_path(target_out_dir, root_build_dir)) + "/"
+}
+
+vk_gen_include_dir = "$root_gen_dir/../include"
+
+# TODO: this should go in its own file.
+config("skia_public_config") {
+  include_dirs = [
+    volcano_prefix + "vendor/skia/include/android",
+    volcano_prefix + "vendor/skia/include/c",
+    volcano_prefix + "vendor/skia/include/codec",
+    volcano_prefix + "vendor/skia/include/config",
+    volcano_prefix + "vendor/skia/include/core",
+    volcano_prefix + "vendor/skia/include/effects",
+    volcano_prefix + "vendor/skia/include/encode",
+    volcano_prefix + "vendor/skia/include/gpu",
+    volcano_prefix + "vendor/skia/include/gpu/gl",
+    volcano_prefix + "vendor/skia/include/pathops",
+    volcano_prefix + "vendor/skia/include/ports",
+    volcano_prefix + "vendor/skia/include/svg",
+    volcano_prefix + "vendor/skia/include/utils",
+    volcano_prefix + "vendor/skia/include/utils/mac",
+  ]
+}
+
+template("lvl_genvk") {
+  action(target_name) {
+    forward_variables_from(invoker, [
+      "deps",
+      "vk_generator",
+      "vk_out_dir",
+      "vk_xml_path",
+    ])
+    if (!defined(vk_out_dir)) {
+      vk_out_dir = "$vk_gen_include_dir/vulkan"
+    }
+    outputs = [ "$vk_out_dir/$target_name" ]
+
+    if (!defined(vk_xml_path)) {
+      vk_xml_path = volcano_prefix + "vendor/vulkansamples/scripts/vk.xml"
+    }
+    if (!defined(vk_generator)) {
+      vk_generator = vulkansamples + "scripts/helper_file_generator.py"
+    }
+    inputs = [
+      vk_xml_path,
+      vk_generator,
+    ]
+
+    script = vulkansamples + "scripts/lvl_genvk.py"
+    args = [
+      "-quiet",
+      "-registry",
+      rebase_path(vk_xml_path, root_build_dir),
+      "-o",
+      rebase_path(vk_out_dir, root_build_dir),
+      target_name,
+    ]
+  }
+}
+
+template("vk_layer") {
+  forward_variables_from(invoker, [ "is_meta_layer" ])
+  json_file_name = "VkLayer_" + target_name + ".json"
+
+  if (defined(is_meta_layer) && is_meta_layer) {
+    copy("VkLayer_" + target_name) {
+      if (is_win) {
+        sources = [ vulkansamples + "layers/windows/$json_file_name" ]
+      } else {
+        sources = [ vulkansamples + "layers/linux/$json_file_name" ]
+      }
+      outputs = [ vulkan_install_dir + "/explicit_layer.d/$json_file_name" ]
+    }
+  } else {
+    copy(json_file_name) {
+      if (is_win) {
+        sources = [ vulkansamples + "layers/windows/$json_file_name" ]
+      } else {
+        sources = [ vulkansamples + "layers/linux/$json_file_name" ]
+      }
+      outputs = [ vulkan_install_dir + "/explicit_layer.d/$json_file_name" ]
+    }
+
+    shared_library(target_name) {
+      forward_variables_from(invoker, "*")
+      output_dir = vulkan_install_dir + "/explicit_layer.d"
+      output_name = "VkLayer_" + target_name
+      configs += [
+        ":local_config_include_dir_loader",
+        ":local_config_include_dir_layers",
+        ":vulkan_local_config",
+        ":vulkan_config",
+      ]
+
+      if (!defined(deps)) {
+        deps = []
+      }
+      if (is_win) {
+        # Use the /MD and /MDd C Runtime.
+        configs += [ "//src/gn/config/win:dynamic_crt" ]
+        # Tell the linker where the .def file is.
+        # .def files are only needed if functions are not decorated
+        # with __declspec(dllexport). The .def file names the
+        # functions to be exported from the DLL.
+        ldflags = [ "/def:" +
+                    rebase_path(vulkansamples +
+                                "layers/VkLayer_$target_name" + ".def") ]
+      } else {
+        # TODO: maybe use configs += //src/gn/config/posix:executable_ldconfig.
+        ldflags = [ "-Wl,-rpath=\$ORIGIN" ]
+      }
+      deps += [
+        ":VkLayer_utils",
+        ":$json_file_name",
+      ]
+    }
+  }
+}
+
+# unused: all platforms are set to use unknown_ext_chain.c instead of assembler.
+template("assembler") {
+  source_file_name = target_name + ".S"
+  copy_to_end_in_s = "copy_" + target_name + ".S"
+
+  copy(copy_to_end_in_s) {
+    sources = [ target_name ]
+    outputs = [ "$target_gen_dir/" + source_file_name ]
+  }
+
+  source_set(target_name) {
+    forward_variables_from(invoker, "*")
+    sources = [ "$target_gen_dir/" + source_file_name ]
+    deps = [ ":" + copy_to_end_in_s ]
+  }
+}
+
+config("vulkan_config") {
+  include_dirs = [ "$vk_gen_include_dir" ]
+  if (is_win) {
+    defines = [
+      "VK_USE_PLATFORM_WIN32_KHR",
+      "WIN32_LEAN_AND_MEAN",
+      "_HAS_EXCEPTIONS=0", # disable exceptions in STL
+    ]
+    if (!use_dynamic_crt) {
+      defines += [ "_STATIC_CPPLIB" ] # also needed to disable exceptions
+    }
+  } else if (is_android) {
+    defines = [
+      "ANDROID",
+      "VK_USE_PLATFORM_ANDROID_KHR",
+    ]
+    cflags = [
+      "-ffunction-sections",
+      "-funwind-tables",
+      "-no-canonical-prefixes",
+      "-Wa,--noexecstack",
+    ]
+    ldflags = [
+      "-Wl,--build-id",
+      "-Wl,-z,noexecstack",
+      "-Wl,-z,relro",
+      "-Wl,-z,now",
+      "-Wl,--warn-shared-textrel",
+      "-Wl,--fatal-warnings",
+      "-Wl,--no-undefined",
+    ]
+    include_dirs += [ vulkansamples ]
+  }
+}
+
+config("glm_config") {
+  if (!is_win) {
+    cflags = [ "-Wno-undefined-reinterpret-cast" ]
+  }
+  include_dirs = [ vulkansamples + "libs" ]
+}
+
+group("glm") {
+  public_configs = [ ":glm_config" ]
+}
+
+# vk_format_utils.cpp is used inside validation layers but is also used by
+# outside code with volcano and volcanosamples.
+source_set("vk_format_utils") {
+  sources = [ vulkansamples + "layers/vk_format_utils.cpp" ]
+  public_configs = [ ":vulkan_config" ]
+  deps = [ ":vk_format_utils.h" ]
+}
+
+action("vk_format_utils.h") {
+  # grep.py is because of Android: include vulkan/vulkan.h is incorrect! See
+  # VkPtr.h, the one and only place vulkan.h is included.
+  script = "//src/gn/vendor/vulkansamples/grep.py"
+  inputs = [ vulkansamples + "layers/vk_format_utils.h" ]
+  outputs = [ "$vk_gen_include_dir/vulkan/vk_format_utils.h" ]
+  args = [
+    rebase_path(vulkansamples + "layers/vk_format_utils.h"),
+    rebase_path("$vk_gen_include_dir/vulkan/vk_format_utils.h"),
+  ]
+  if (!is_android) {
+    deps = [ ":vulkan_headers" ]
+  }
+}
+
+#
+# Android support is pre-built by checking out github.com/LunarG/VulkanSamples
+# at the ndk_api version. (Abusing a single git checkout to reference different
+# commits is another option, estimated to be much more complex.)
+# NDK_DIR=$NDK_HOME/platforms/android-$NDK_API/arch-arm/usr/include/vulkan
+# cd VulkanSamples && git checkout 3859b21 && scripts/vk_helper.py \
+#                     --gen_enum_string_helper $NDK_DIR/vulkan.h
+#
+if (is_android) {
+
+config("android_native_app_glue_config") {
+  include_dirs = [ "$android_ndk_root/sources/android/native_app_glue" ]
+}
+
+config("android_native_app_glue_local_config") {
+  cflags = [
+    "-Wno-unused-parameter",
+    "-fvisibility=default",  # turn off //src/gn/config:symbol_visibility_hidden
+  ]
+}
+
+# android_native_app_glue is used by GLFWglue to compile
+# android_native_app_glue.c, required to create an android app without Java.
+source_set("android_native_app_glue") {
+  sources = [
+    android_ndk_root +
+      "/sources/android/native_app_glue/android_native_app_glue.c",
+  ]
+  all_dependent_configs = [ ":android_native_app_glue_config" ]
+  configs += [ ":android_native_app_glue_local_config" ]
+}
+
+source_set("vulkan") {
+  sources = [ vulkansamples + "common/vulkan_wrapper.cpp" ]
+  deps = [ ":android_vk_enum_string_helper.h" ]
+  public_configs = [ ":vulkan_config" ]
+}
+
+group("vulkansamples") {
+  deps = [ ":vulkan" ]
+  public_configs = [ ":vulkan_config" ]
+}
+
+copy("android_vk_enum_string_helper.h") {
+  sources = [
+    volcano_prefix + "vendor/android-ndk-$android_ndk_major_version" +
+    "/vk_enum_string_helper.h",
+  ]
+  outputs = [ "$vk_gen_include_dir/vulkan/{{source_file_part}}" ]
+}
+
+#
+# The rest of this BUILD.gn is for non-android targets.
+# AOSP vulkan implementation can be found here:
+# https://android.googlesource.com/platform/frameworks/native/+/master/vulkan
+#
+} else {
+
+lvl_genvk("vk_enum_string_helper.h") {}
+
+copy("vulkan_headers") {
+  # this target is only needed for downstream BUILD.gn files that expect
+  # the vulkan SDK to be deployed with headers and libs in the same dir
+  # (in particular, skia has only skia_vulkan_sdk)
+  sources = [
+    vulkansamples + "include/vulkan/vk_icd.h",
+    vulkansamples + "include/vulkan/vk_layer.h",
+    vulkansamples + "include/vulkan/vk_platform.h",
+    vulkansamples + "include/vulkan/vk_sdk_platform.h",
+    vulkansamples + "include/vulkan/vulkan.h",
+    vulkansamples + "include/vulkan/vulkan.hpp",
+  ]
+  outputs = [ "$vk_gen_include_dir/vulkan/{{source_file_part}}" ]
+  if (is_win && !use_dynamic_crt) {
+    all_dependent_configs = [ ":vulkan_import_lib" ]
+  }
+}
+
+config("vulkan_import_lib") {
+  ldflags = [ "vulkan-1.dll.lib" ]
+}
+
+config("vulkan_local_config") {
+  include_dirs = [ "$vk_gen_include_dir/vulkan" ]
+
+  defines = [
+    "API_NAME=\"Vulkan\"",
+    "__STDC_FORMAT_MACROS", # vk_layer_logging.h:361:54: error: expected ')' before 'PRIx64'
+  ]
+  if (is_debug) {
+    defines += [ "DEBUG" ]
+  }
+
+  if (is_win) {
+    cflags = []
+  } else if (is_android || is_mac || is_ios || is_tvos || is_linux) {
+    cflags = [
+      "-Wno-cast-qual",
+      "-Wno-missing-field-initializers",
+      "-Wno-unused-parameter",
+      "-Wno-unused-function",
+      "-Wno-strict-overflow",
+      "-Wno-format-nonliteral",
+      "-Wpointer-arith",
+      "-Wno-strict-aliasing",
+    ]
+    defines += [
+      "FALLBACK_CONFIG_DIRS=\"/etc/xdg\"",
+      "FALLBACK_DATA_DIRS=\"/etc/xdg\"",
+      "EXTRASYSCONFDIR=\"/" + rebase_path(root_out_dir, "/") + "\"",
+      "SYSCONFDIR=\"/etc\"",
+    ]
+
+    if (is_xcb_enabled) {
+      defines += [ "VK_USE_PLATFORM_XCB_KHR" ]
+    }
+    if (is_xlib_enabled) {
+      defines += [
+        "VK_USE_PLATFORM_XLIB_KHR",
+        "VK_USE_PLATFORM_XLIB_XRANDR_EXT",
+      ]
+    }
+    if (is_wayland_enabled) {
+      defines += [ "VK_USE_PLATFORM_WAYLAND_KHR" ]
+    }
+  } else {
+    assert(false, "Unsupported platform.")
+  }
+}
+
+config("local_config_include_dir_loader") {
+  include_dirs = [ vulkansamples + "loader" ]
+}
+
+config("local_config_include_dir_layers") {
+  include_dirs = [ vulkansamples + "layers" ]
+}
+
+copy("vk_validation_error_messages.h") {
+  # scripts/parameter_validation_generator.py can only find the file in its "."
+  sources = [
+    vulkansamples + "layers/vk_validation_error_messages.h",
+  ]
+  outputs = [ "$root_build_dir/{{source_file_part}}" ]
+}
+
+lvl_genvk("vk_loader_extensions.h") {
+  vk_generator = vulkansamples + "scripts/loader_extension_generator.py"
+}
+lvl_genvk("vk_loader_extensions.c") {
+  vk_generator = vulkansamples + "scripts/loader_extension_generator.py"
+}
+
+if (is_win && !use_dynamic_crt) {
+  group("vulkan") {
+    # Prevent accidentally building vulkan-1.dll code into the app itself,
+    # which would make for some difficult-to-debug code duplication.
+
+    # -DNOMINMAX prevents <windows.h> from defining 'min' and 'max' macros.
+    public_configs = [ "//src/gn/config/win:nominmax" ]
+  }
+} else {
+  shared_library("vulkan") {
+    # CMake uses loader/loader_cmake_config.h.in. This emulates it.
+    # Another option: defines += VULKAN_NON_CMAKE_BUILD and HAVE_SECURE_GETENV
+    # but detecting glibc features is easier done by probing the glibc version.
+    write_file("$target_gen_dir/loader_cmake_config.h", [
+      "/** Copyright (c) 2017 the Volcano Authors. Licensed under the GPLv3.",
+      " * THIS FILE IS AUTO-GENERATED. ALL EDITS WILL BE DISCARDED.",
+      " * Source file: gn/vendor/vulkansamples/BUILD.gn",
+      " */",
+      "#ifdef __GLIBC__",
+      "#if defined(__GLIBC_MINOR__) && (__GLIBC__>=2) && " +
+          "(__GLIBC_MINOR__>=17)",
+      "#define HAVE_SECURE_GETENV",
+      "#else /* glibc version 2.17 introduced secure_getenv */",
+      "/* glibc before 2.17 may or may not have __secure_getenv */",
+      "#define HAVE___SECURE_GETENV",
+      "#endif /* glibc version 2.17 introduced secure_getenv */",
+      "#else /*__GLIBC__*/",
+      "/* Assume secure_getenv is available */",
+      "#define HAVE_SECURE_GETENV",
+      "#endif /*__GLIBC__*/",
+    ])
+
+    include_dirs = [ "$target_gen_dir" ]
+
+    sources = [
+      vulkansamples + "loader/extension_manual.c",
+      vulkansamples + "loader/loader.c",
+      vulkansamples + "loader/trampoline.c",
+      vulkansamples + "loader/wsi.c",
+      vulkansamples + "loader/debug_report.c",
+      vulkansamples + "loader/cJSON.c",
+      vulkansamples + "loader/murmurhash.c",
+
+      vulkansamples + "loader/dev_ext_trampoline.c",
+      vulkansamples + "loader/phys_dev_ext.c",
+      vulkansamples + "loader/unknown_ext_chain.c",
+    ]
+
+    if (is_xcb_enabled) {
+      libs = [
+        "X11-xcb",
+        "xcb",
+      ]
+    }
+    if (is_xlib_enabled) {
+      # no libs needed
+    }
+    if (is_wayland_enabled) {
+      libs = [
+        "wayland-client",
+        "wayland-server",
+        "wayland-egl",
+        "wayland-cursor",
+      ]
+    }
+
+    deps = [
+      ":generate_helper_files",
+      ":vulkan_headers",
+      ":vk_loader_extensions.h",
+      ":vk_loader_extensions.c",
+    ]
+
+    public_configs = [ ":vulkan_config" ]
+    configs += [
+      ":local_config_include_dir_loader",
+      ":vulkan_local_config",
+    ]
+
+    if (is_win) {
+      output_name = "vulkan-" + vulkan_api_major
+      libs = [
+        "advapi32.lib",
+        "shlwapi.lib",
+        "Cfgmgr32.lib",
+      ]
+      sources += [ vulkansamples + "loader/dirent_on_windows.c" ]
+      # Use the /MD and /MDd C Runtime.
+      configs += [ "//src/gn/config/win:dynamic_crt" ]
+      ldflags = [ "/def:" +
+                  rebase_path(vulkansamples +
+                              "loader/$target_name" + "-$vulkan_api_major.def") ]
+    } else {
+      output_extension = "so.$vulkan_api_major"
+    }
+  }
+}
+
+lvl_genvk("vk_struct_size_helper.h") {}
+lvl_genvk("vk_struct_size_helper.c") {}
+lvl_genvk("vk_safe_struct.h") {}
+lvl_genvk("vk_safe_struct.cpp") {}  #included in several layers/*.cpp files.
+lvl_genvk("vk_layer_dispatch_table.h") {
+  vk_generator = vulkansamples + "scripts/loader_extension_generator.py"
+}
+
+
+group("generate_helper_files") {
+  deps = [
+    ":vulkan_headers",
+    ":vk_enum_string_helper.h",
+    ":vk_struct_size_helper.h",
+    ":vk_struct_size_helper.c",
+    ":vk_safe_struct.h",
+    ":vk_safe_struct.cpp",
+    ":vk_layer_dispatch_table.h",
+  ]
+}
+
+vk_layer("standard_validation") {
+  is_meta_layer = true
+}
+
+config("include_spirv_tools_from_skia") {
+  include_dirs = [
+    vulkansamples + "../skia/third_party/externals/spirv-tools/include",
+  ]
+}
+
+lvl_genvk("vk_object_types.h") {}
+lvl_genvk("vk_extension_helper.h") {}
+vk_layer("core_validation") {
+  deps = [
+    ":generate_helper_files",
+    "../glslang:SPIRV",
+    ":vk_object_types.h",
+    ":vk_extension_helper.h",
+  ]
+  public_configs = [ ":include_spirv_tools_from_skia" ]
+  sources = [
+    vulkansamples + "layers/core_validation.cpp",
+    vulkansamples + "layers/descriptor_sets.cpp",
+    vulkansamples + "layers/buffer_validation.cpp",
+    vulkansamples + "layers/shader_validation.cpp",
+  ]
+  if (is_win) {
+    lib = "spirv-tools.lib"
+  } else {
+    lib = "libspirv-tools.a"
+  }
+  libs = [ "$root_out_dir/skia/$lib" ]
+}
+
+lvl_genvk("object_tracker.cpp") {
+  vk_generator = vulkansamples + "scripts/object_tracker_generator.py"
+  vk_out_dir = target_gen_dir
+  deps = [ ":vk_validation_error_messages.h" ]
+}
+vk_layer("object_tracker") {
+  sources = [
+    vulkansamples + "layers/object_tracker_utils.cpp",
+    "$target_gen_dir/object_tracker.cpp",
+  ]
+  deps = [
+    ":object_tracker.cpp",
+    ":vk_object_types.h",
+  ]
+}
+
+lvl_genvk("thread_check.h") {
+  vk_generator = vulkansamples + "scripts/threading_generator.py"
+}
+vk_layer("threading") {
+  include_dirs = [ vulkansamples + "layers" ]
+  sources = [ vulkansamples + "layers/threading.cpp" ]
+  deps = [ ":thread_check.h" ]
+}
+
+lvl_genvk("unique_objects_wrappers.h") {
+  vk_generator = vulkansamples + "scripts/unique_objects_generator.py"
+}
+vk_layer("unique_objects") {
+  sources = [ vulkansamples + "layers/unique_objects.cpp" ]
+  deps = [
+    ":vk_object_types.h",
+    ":unique_objects_wrappers.h",
+  ]
+}
+
+lvl_genvk("parameter_validation.cpp") {
+  vk_generator = vulkansamples + "scripts/parameter_validation_generator.py"
+  vk_out_dir = target_gen_dir
+  deps = [ ":vk_validation_error_messages.h" ]
+}
+vk_layer("parameter_validation") {
+  include_dirs = [ vulkansamples + "layers" ]
+  sources = [
+    vulkansamples + "layers/parameter_validation_utils.cpp",
+    "$target_gen_dir/parameter_validation.cpp",
+  ]
+  deps = [
+    ":parameter_validation.cpp",
+    ":vk_extension_helper.h",
+  ]
+}
+
+lvl_genvk("vk_dispatch_table_helper.h") {
+  vk_generator = vulkansamples + "scripts/dispatch_table_helper_generator.py"
+}
+static_library("VkLayer_utils") {
+  output_dir = vulkan_install_dir + "/explicit_layer.d"
+  configs += [
+    ":local_config_include_dir_loader",
+    ":vulkan_local_config",
+    ":vulkan_config",
+  ]
+
+  sources = [
+    vulkansamples + "layers/vk_layer_config.cpp",
+    vulkansamples + "layers/vk_layer_extension_utils.cpp",
+    vulkansamples + "layers/vk_layer_utils.cpp",
+    vulkansamples + "layers/vk_layer_table.cpp",
+  ]
+  deps = [
+    ":vulkan_headers",
+    ":generate_helper_files",
+    ":vk_dispatch_table_helper.h",
+    ":vk_format_utils",
+  ]
+}
+
+group("vulkan_layers") {
+  deps = [
+    ":core_validation",
+    ":object_tracker",
+    ":threading",
+    ":unique_objects",
+    ":parameter_validation",
+    ":VkLayer_standard_validation",
+  ]
+}
+
+executable("vulkaninfo") {
+  configs += [
+    ":vulkan_local_config",
+    ":vulkan_config",
+  ]
+
+  sources = [ vulkansamples + "demos/vulkaninfo.c" ]
+
+  if (!is_win && (is_android || is_mac || is_ios || is_tvos || is_linux)) {
+    deps = [ ":vulkan" ]
+    if (is_xcb_enabled) {
+      libs = [ "xcb" ]
+    } else if (is_xlib_enabled) {
+      libs = [ "x11" ]
+    } else if (is_wayland_enabled) {
+      assert(false, "TODO: add Wayland client libraries")
+    }
+  } else if (is_win) {
+    # Windows is its own window manager.
+    # However, some system libraries must be explicitly listed.
+    deps = [ ":generate_helper_files" ]
+    libs = [
+      "gdi32.lib",
+      "user32.lib",
+    ]
+    # This is a console app.
+    configs += [ "//src/gn/config/win:console" ]
+  } else {
+    assert(false, "Unsupported platform.")
+  }
+
+  # On windows, use_dynamic_crt must be true for all libraries used to build
+  # the DLLs (the validation layers). And nothing not involved in a DLL can be
+  # built while use_dynamic_crt is true.
+  #
+  # build.cmd on windows does a separate ninja -C out/DebugDLL for this.
+  if (use_vulkan_layers && !is_win) {
+    deps += [ ":vulkan_layers" ]
+  }
+}
+
+group("vulkansamples") {
+  # Automatically build :vulkaninfo, though it might not be used.
+  deps = [ ":vulkaninfo" ]
+  if (!is_win) {
+    deps += [ ":vulkan" ]
+  }
+  public_configs = [ ":vulkan_config" ]
+}
+
+#
+# The above is only defined for non-android targets
+#
+} # if (is_android)
+#
+#
+#
+
+group("default") {
+  deps = [ ":vulkansamples" ]
+}

@@ -6,21 +6,20 @@ declare_args() {
 }
 
 config("language_config") {
-  cflags = [
-    "-Wall",
-    "-Wextra",
-    "-Wformat=2",
-    "-fstrict-aliasing",
-    "-Wstrict-aliasing",
-    "-fstrict-overflow",
-    "-Wstrict-overflow=5",
-    "-frtti",
-  ]
-  if (is_mac) {
-    cflags += [
-      "-Wno-newline-eof",
+  if (!is_win) {
+    cflags = [
+      "-Wall",
+      "-Wextra",
+      "-Wformat=2",
+      "-fstrict-aliasing",
+      "-Wstrict-aliasing",
+      "-fstrict-overflow",
+      "-Wstrict-overflow=5",
+      "-frtti",
+      "-Wno-missing-field-initializers",
     ]
-  } else {
+  }
+  if (is_linux) {
     cflags += [
       "-Og",
       "-ggdb",
@@ -34,20 +33,23 @@ config("language_local_config") {
 
 static_library("language") {
   sources = [
-    "src/language/VkEnum.cpp",
     "src/language/choose.cpp",
     "src/language/debug.cpp",
     "src/language/device.cpp",
     "src/language/imageview.cpp",
+    "src/language/log.cpp",
     "src/language/language.cpp",
     "src/language/queues.cpp",
     "src/language/requestqfams.cpp",
+    "src/language/supported_queues.cpp",
     "src/language/swapchain.cpp",
+    "src/language/VkEnum.cpp",
+    "src/language/utf8dec.cpp",
+    "src/language/utf8enc.cpp",
   ]
 
-  deps = [ "//vendor/vulkansamples:vulkan" ]
+  public_deps = [ "//src/gn/vendor/vulkansamples" ]
 
-  configs -= [ "//gn:no_rtti" ]
   public_configs = [ ":language_local_config" ]
   all_dependent_configs = [ ":language_config" ]
   public = [
@@ -59,25 +61,25 @@ static_library("command") {
   sources = [
     "src/command/command.cpp",
     "src/command/fence.cpp",
+    "src/command/find_in_paths.cpp",
+    "src/command/mmap.cpp",
     "src/command/pipeline.cpp",
+    "src/command/pipeline_create.cpp",
     "src/command/render.cpp",
-    "src/command/shader.cpp",
   ]
 
-  deps = [
-    ":language",
-    "//vendor/vulkansamples:vulkan",
-  ]
+  deps = [ ":language" ]
+  public_deps = [ "//src/gn/vendor/vulkansamples" ]
 
-  configs -= [ "//gn:no_rtti" ]
   public_configs = [ ":language_local_config" ]
   public = [
     "src/command/command.h",
   ]
 }
 
-static_library("memory") {
+source_set("memory") {
   sources = [
+    "src/memory/add_depth.cpp",
     "src/memory/descriptor.cpp",
     "src/memory/memory.cpp",
     "src/memory/layout.cpp",
@@ -87,10 +89,10 @@ static_library("memory") {
   deps = [
     ":command",
     ":language",
-    "//vendor/vulkansamples:vulkan",
+    "//src/gn/vendor/vulkansamples:vk_format_utils",
   ]
+  public_deps = [ "//src/gn/vendor/vulkansamples" ]
 
-  configs -= [ "//gn:no_rtti" ]
   public_configs = [ ":language_local_config" ]
   public = [
     "src/memory/memory.h",
@@ -109,14 +111,13 @@ source_set("science") {
     ":command",
     ":language",
     ":memory",
-    "//vendor/vulkansamples:vulkan",
   ]
   if (use_spirv_cross_reflection) {
     sources += [ "src/science/reflect.cpp" ]
-    deps += [ "//vendor/spirv_cross" ]
+    deps += [ "//src/gn/vendor/spirv_cross" ]
   }
+  public_deps = [ "//src/gn/vendor/vulkansamples" ]
 
-  configs -= [ "//gn:no_rtti" ]
   public_configs = [
     ":language_local_config",
     ":science_config",
@@ -132,9 +133,12 @@ group("volcano") {
   ]
 }
 
+import("//src/gn/vendor/androidExecutable.gni")
 group("default") {
-  testonly = true
-  deps = [
-    "test:basic_test",
-  ]
+  if (!is_android && android_variants_dir == "") {
+    testonly = true
+    deps = [
+      "test:basic_test",
+    ]
+  }
 }

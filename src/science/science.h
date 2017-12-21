@@ -11,274 +11,412 @@
 #include <src/language/language.h>
 #include <src/memory/memory.h>
 #include <string.h>
+#ifndef _WIN32
 #include <unistd.h>
-#include <memory>
+#endif
 
 #pragma once
 
 namespace science {
 
+// Forward-declare SubresUpdate for SubresUpdateBase.
+template <typename T>
+class SubresUpdate;
+
+// SubresUpdateBase contains some common code.
+// See SubresUpdate and specializations below.
+template <typename T>
+class SubresUpdateBase {
+ public:
+  SubresUpdateBase(T& wrapped_) {
+    wrapped = &wrapped_;
+
+    // Work around gcc -O2 bug which causes null pointer deref by optimizing
+    // out wrapped = &wrapped_ above.
+    char buf[128];
+    snprintf(buf, sizeof(buf), "%p", wrapped);
+  }
+
+  // Specify that this Subres applied to a color attachment.
+  SubresUpdate<T>& addColor() {
+    wrapped->aspectMask |= VK_IMAGE_ASPECT_COLOR_BIT;
+    return *static_cast<SubresUpdate<T>*>(this);
+  }
+  // Specify that this Subres applied to a depth attachment.
+  SubresUpdate<T>& addDepth() {
+    wrapped->aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
+    return *static_cast<SubresUpdate<T>*>(this);
+  }
+  // Specify that this Subres applied to a stencil attachment.
+  SubresUpdate<T>& addStencil() {
+    wrapped->aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    return *static_cast<SubresUpdate<T>*>(this);
+  }
+
+  // Specify layer offset and count. Might be used for stereo displays.
+  SubresUpdate<T>& setLayer(uint32_t offset, uint32_t count) {
+    wrapped->baseArrayLayer = offset;
+    wrapped->layerCount = count;
+    return *static_cast<SubresUpdate<T>*>(this);
+  }
+
+ protected:
+  T* wrapped{nullptr};
+};
+
 // SubresUpdate is a builder pattern for populating a
-// VkImageSubresourceRange ... or a
-// VkImageSubresourceLayers.
+// VkImageSubresourceRange or a VkImageSubresourceLayers.
 //
 // Example usage:
+//    #include <vulkan/vk_format_utils.h>
+//    VkImageMemoryBarrier imageB;
+//    ... // set up imageB
+//    auto u = Subres(imageB.subresourceRange).addDepth();
+//    if (FormatHasStencil(info.format)) {
+//      u.addStencil();
+//    }
+//
+// SubresUpdate is like Subres except it does not zero out the wrapped type.
+// This is for code that will *Update* an existing object.
+template <typename T>
+class SubresUpdate : public SubresUpdateBase<T> {
+  // Template specialization requires separate definitions below.
+};
+
+// SubresUpdate<T> will automatically use this definition if T is a
+// VkImageSubresourceRange.
+template <>
+class SubresUpdate<VkImageSubresourceRange>
+    : public SubresUpdateBase<VkImageSubresourceRange> {
+ public:
+  // Constructor takes a wrapped object. Object may be VkImageSubresourceRange
+  // or VkImageSubresourceLayers.
+  SubresUpdate(VkImageSubresourceRange& wrapped_)
+      : SubresUpdateBase(wrapped_) {}
+
+  // Specify mip-mapping offset and count.
+  // Only works for VkImageSubresourceRange! The compiler will fail with:
+  // error: 'class science::SubresUpdate<VkImageSubresourceLayers>' has no
+  // member named 'setMips' -- because VkImageSubresourceLayers is different.
+  SubresUpdate& setMips(uint32_t offset, uint32_t count) {
+    wrapped->baseMipLevel = offset;
+    wrapped->levelCount = count;
+    return *this;
+  }
+
+  // reset throws away all updates, resetting the values to defaults.
+  SubresUpdate& reset() {
+    memset(wrapped, 0, sizeof(*wrapped));
+    wrapped->levelCount = 1;  // Assume 1 mipmap (no mipmapping).
+    wrapped->layerCount = 1;  // Assume 1 layer (no stereo).
+    return *this;
+  }
+};
+
+// SubresUpdate<T> will automatically use this definition if T is a
+// VkImageSubresourceLayers.
+template <>
+class SubresUpdate<VkImageSubresourceLayers>
+    : public SubresUpdateBase<VkImageSubresourceLayers> {
+ public:
+  // Constructor takes a wrapped object. Object may be VkImageSubresourceRange
+  // or VkImageSubresourceLayers.
+  SubresUpdate(VkImageSubresourceLayers& wrapped_)
+      : SubresUpdateBase(wrapped_) {}
+
+  // Specify mipmap layer.
+  // Only works for VkImageSubresourceLayers! The compiler will fail with:
+  // error: 'class science::SubresUpdate<VkImageSubresourceRange>' has no
+  // member named 'setMipLevel' -- because VkImageSubresourceRange is different.
+  SubresUpdate& setMipLevel(uint32_t level) {
+    wrapped->mipLevel = level;
+    return *this;
+  }
+
+  // reset throws away all updates, resetting the values to defaults.
+  SubresUpdate& reset() {
+    memset(wrapped, 0, sizeof(*wrapped));
+    wrapped->layerCount = 1;  // Assume 1 layer (no stereo).
+    return *this;
+  }
+};
+
+// Subres is a builder pattern for populating a
+// VkImageSubresourceRange or a VkImageSubresourceLayers.
+//
+// Construct it wrapped around an existing VkImageSubresourceRange or
+// VkImageSubresourceLayers. It will immediately zero out the wrapped type.
+// This is for code that starts from scratch instead of an *Update*.
+//
+// This is better done with ImageCopies, below, but to show a Subres example:
 //   VkImageCopy region = {};
-//   // Just use Subres(), no need for SubresUpdate() in simple use cases.
+//   // Use Subres() to set up a struct from scratch.
 //   science::Subres(region.srcSubresource).addColor();
 //   science::Subres(region.dstSubresource).addColor();
 //   region.srcOffset = {0, 0, 0};
 //   region.dstOffset = {0, 0, 0};
 //   region.extent = ...;
 //
-//   command::CommandBuilder builder(cpool);
-//   if (builder.beginOneTimeUse() ||
-//       builder.copyImage(srcImage.vk, dstImage.vk,
+//   command::SmartCommandBuffer buffer(cpool);
+//   if (buffer.ctorError() || buffer.autoSubmit() ||
+//       buffer.copyImage(srcImage.vk, dstImage.vk,
 //           std::vector<VkImageCopy>{region})) { ... handle error ... }
+template <typename T>
+inline SubresUpdate<T>& Subres(T& wrapped_) {
+  return SubresUpdate<T>(wrapped_).reset();
+}
+
+// ImageCopies is a vector of VkImageCopy with convenient methods for quickly
+// creating each VkImageCopy.
 //
-// SubresUpdate is like Subres except it does not zero out the wrapped type,
-// to allow for additional building.
-class SubresUpdate {
+// Example usage:
+//  if (buffer.copyImage(src.vk, src.currentLayout, dst.vk, dst.currentLayout,
+//                       science::ImageCopies(src))) { ... }
+class ImageCopies : public std::vector<VkImageCopy> {
  public:
-  // Construct a SubresUpdate that modifies a VkImageSubresourceRange.
-  SubresUpdate(VkImageSubresourceRange& range_) : range(&range_) {}
-  // Construct a SubresUpdate that modifies a VkImageSubresourceLayers.
-  SubresUpdate(VkImageSubresourceLayers& layers_) : layers(&layers_) {}
+  // These are all the constructors that std::vector defines.
+  typedef std::allocator<VkImageCopy> Allocator;
+  explicit ImageCopies(const Allocator& alloc = Allocator())
+      : std::vector<VkImageCopy>(alloc) {}
+  ImageCopies(size_type count, const VkImageCopy& value = {},
+              const Allocator& alloc = Allocator())
+      : std::vector<VkImageCopy>(count, value, alloc) {}
+#ifndef __ANDROID__
+  explicit ImageCopies(size_type count, const Allocator& alloc = Allocator())
+      : std::vector<VkImageCopy>(count, alloc) {}
+#endif
+  template <class InputIt>
+  ImageCopies(InputIt first, InputIt last, const Allocator& alloc = Allocator())
+      : std::vector<VkImageCopy>(first, last, alloc) {}
+  ImageCopies(const ImageCopies& other) : std::vector<VkImageCopy>(other) {}
+  ImageCopies(const ImageCopies& other, const Allocator& alloc)
+      : std::vector<VkImageCopy>(other, alloc) {}
+  ImageCopies(ImageCopies&& other) : std::vector<VkImageCopy>(other) {}
+  ImageCopies(ImageCopies&& other, const Allocator& alloc)
+      : std::vector<VkImageCopy>(other, alloc) {}
+  ImageCopies(std::initializer_list<VkImageCopy> init,
+              const Allocator& alloc = Allocator())
+      : std::vector<VkImageCopy>(init, alloc) {}
 
-  // Specify that this Subres applied to a color attachment.
-  SubresUpdate& addColor() {
-    if (range) {
-      range->aspectMask |= VK_IMAGE_ASPECT_COLOR_BIT;
-    }
-    if (layers) {
-      layers->aspectMask |= VK_IMAGE_ASPECT_COLOR_BIT;
-    }
-    return *this;
-  }
-  // Specify that this Subres applied to a depth attachment.
-  SubresUpdate& addDepth() {
-    if (range) {
-      range->aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
-    }
-    if (layers) {
-      layers->aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
-    }
-    return *this;
-  }
-  // Specify that this Subres applied to a stencil attachment.
-  SubresUpdate& addStencil() {
-    if (range) {
-      range->aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-    }
-    if (layers) {
-      layers->aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-    }
-    return *this;
-  }
+  // Constructor for creating a straight 1:1 copy of src.
+  ImageCopies(memory::Image& src) { addSrc(src); }
 
-  // Specify mip-mapping offset and count.
-  // This only applies to VkImageSubresourceRange, and will abort on a
-  // VkImageSubresourceLayers.
-  SubresUpdate& setMips(uint32_t offset, uint32_t count) {
-    if (range) {
-      range->baseMipLevel = offset;
-      range->levelCount = count;
-    }
-    if (layers) {
-      fprintf(stderr,
-              "Subres: cannot setMips() on VkImageSubresourceLayers. "
-              "Try setMip() instead.\n");
-      exit(1);
-    }
-    return *this;
-  }
-
-  // Specify mipmap layer.
-  // This applies to VkImageSubresourceLayers, and will abort on a
-  // VkImageSubresourceRange
-  SubresUpdate& setMip(uint32_t level) {
-    if (range) {
-      fprintf(stderr,
-              "Subres: cannot setMip() on VkImageSubresourceRange. "
-              "Try setMips() instead.\n");
-      exit(1);
-    }
-    if (layers) {
-      layers->mipLevel = level;
-    }
-    return *this;
-  }
-
-  // Specify layer offset and count. Might be used for stereo displays.
-  SubresUpdate& setLayer(uint32_t offset, uint32_t count) {
-    if (range) {
-      range->baseArrayLayer = offset;
-      range->layerCount = count;
-    }
-    if (layers) {
-      layers->baseArrayLayer = offset;
-      layers->layerCount = count;
-    }
-    return *this;
-  }
-
- protected:
-  VkImageSubresourceRange* range = nullptr;
-  VkImageSubresourceLayers* layers = nullptr;
+  void addSrc(memory::Image& src);
+  void addSrcAtMipLevel(memory::Image& src, uint32_t mipLevel);
 };
 
-// Subres is a builder pattern for populating a
-// VkImageSubresourceRange ... or a
-// VkImageSubresourceLayers.
-//
-// Construct it wrapped around an existing VkImageSubresourceRange or
-// VkImageSubresourceLayers. It will immediately zero out the wrapped type.
-// Then use the mutator methods to build the type.
-class Subres : public SubresUpdate {
- public:
-  // Construct a Subres that modifies a VkImageSubresourceRange.
-  Subres(VkImageSubresourceRange& range_) : SubresUpdate(range_) {
-    memset(range, 0, sizeof(*range));
-    range->baseMipLevel = 0;    // Mipmap level offset (none).
-    range->levelCount = 1;      // There is 1 mipmap (no mipmapping).
-    range->baseArrayLayer = 0;  // Offset in layerCount layers.
-    range->layerCount = 1;      // Might be 2 for stereo displays.
+// CommandPoolContainer lets your application use onResized() for easy handling
+// of the swapchain.
+// NOTE: This assumes you use a single language::Device.
+//       Even multiple GPUs only use a single language::Device
+//       (see VkDeviceGroupSubmitInfoKHX).
+// NOTE: Defaults the CommandPool::queueFamily to language::GRAPHICS. Your app
+//       can customize the type of queue family.
+struct CommandPoolContainer {
+  CommandPoolContainer() = delete;  // You *must* call with a Device& argument.
+  CommandPoolContainer(language::Device& dev) : cpool{dev}, pass{dev} {
+    cpool.queueFamily = language::GRAPHICS;
   }
-  // Construct a Subres that modifies a VkImageSubresourceLayers.
-  Subres(VkImageSubresourceLayers& layers_) : SubresUpdate(layers_) {
-    memset(layers, 0, sizeof(*layers));
-    layers->mipLevel = 0;        // First mipmap level.
-    layers->baseArrayLayer = 0;  // Offset in layerCount layers.
-    layers->layerCount = 1;      // Might be 2 for stereo displays.
-  }
-};
+  virtual ~CommandPoolContainer();
 
-// hasStencil() returns whether a VkFormat includes the stencil buffer or not.
-// This is used for example by memory::Image::makeTransition().
-inline bool hasStencil(VkFormat format) {
-  switch (format) {
-    case VK_FORMAT_S8_UINT:
-    case VK_FORMAT_D16_UNORM_S8_UINT:
-    case VK_FORMAT_D24_UNORM_S8_UINT:
-    case VK_FORMAT_D32_SFLOAT_S8_UINT:
-      return true;
-    default:
-      return false;
-  }
-};
+  command::CommandPool cpool;
+  command::RenderPass pass;
+  VkExtent2D prevSize;
 
-// SwapChainResizeObserver is an interface (pure virtual class) which
-// has one virtual method: onResized. Implement this class to get notified
-// when the swapchain is resized.
-class SwapChainResizeObserver {
- public:
-  virtual ~SwapChainResizeObserver();
-
-  // onResized is called when the Device dev's swapchain is resized.
-  // The CommandBuilder builder is ready to receive setup commands related
-  // to the resize (specifically, begin...() has been called on builder).
-  // oldSize is what dev.swapChainInfo.imageExtent was before the resize.
-  WARN_UNUSED_RESULT virtual int onResized(language::Device& dev,
-                                           command::CommandBuilder& builder,
-                                           VkExtent2D oldSize) = 0;
-};
-
-// ResizeDeviceWaitIdle is a convenient SwapChainResizeObserver  which
-// just calls vkDeviceWaitIdle.
-struct ResizeDeviceWaitIdle : public SwapChainResizeObserver {
-  // onResized implements SwapChainResizeObserver::onResized.
-  WARN_UNUSED_RESULT virtual int onResized(language::Device& dev,
-                                           command::CommandBuilder& builder,
-                                           VkExtent2D oldSize) {
-    (void)builder;  // builder is not used. Silence the compiler warning.
-    (void)oldSize;  // oldSize is not used. Silence the compiler warning.
-    VkResult v = vkDeviceWaitIdle(dev.dev);
-    if (v != VK_SUCCESS) {
-      fprintf(stderr, "%s failed: %d (%s)\n",
-              "ResizeDeviceWaitIdle: vkDeviceWaitIdle", v, string_VkResult(v));
-      return 1;
-    }
-    return 0;
-  }
-};
-
-// ResizeResetSwapChain is a convenient SwapChainResizeObserver which
-// just calls language::Device::resetSwapChain.
-struct ResizeResetSwapChain : public SwapChainResizeObserver {
-  // onResized implements SwapChainResizeObserver::onResized.
-  WARN_UNUSED_RESULT virtual int onResized(language::Device& dev,
-                                           command::CommandBuilder& builder,
-                                           VkExtent2D oldSize) {
-    (void)builder;  // builder is not used. Silence the compiler warning.
-    (void)oldSize;  // oldSize is not used. Silence the compiler warning.
-    return dev.resetSwapChain();
-  }
-};
-
-struct SwapChainResizeList {
-  SwapChainResizeList() {
-    // Set up some default initial SwapChainResizeObservers.
-    list.emplace_back(&resizeDeviceWaitIdle);
-    list.emplace_back(&resizeResetSwapChain);
-  }
-  ResizeDeviceWaitIdle resizeDeviceWaitIdle;
-  ResizeResetSwapChain resizeResetSwapChain;
-
-  // list contains all SwapChainResizeObserver to be notified in onResized.
-  std::vector<SwapChainResizeObserver*> list;
-
-  // syncResize notifies all SwapChainResizeObserver in list and waits until
-  // the device has completed any command buffers.
-  int syncResize(command::CommandPool& pool, VkExtent2D newSize,
-                 size_t poolQindex = 0) {
-    command::CommandBuilder rebuilder(pool);
-    if (rebuilder.beginOneTimeUse()) {
-      fprintf(stderr, "SwapChainResizeList: beginOneTimeUse failed\n");
-      return 1;
-    }
-    auto oldSize = pool.dev.swapChainInfo.imageExtent;
-    pool.dev.swapChainInfo.imageExtent = newSize;
-    for (size_t i = 0; i < list.size(); i++) {
-      auto* observer = list.at(i);
-      if (observer->onResized(pool.dev, rebuilder, oldSize)) {
-        fprintf(stderr, "SwapChainResizeList: an observer failed\n");
+  // onResized is called when cpool.dev.framebufs need to be resized.
+  // NOTE: Your application *must* override this but call
+  // CommandPoolContainer::onResized as the first thing in your method.
+  // NOTE #2: resetSwapChain *modifies* newSize. Your application *must not*
+  // assume newSize as passed in is the same. Get the updated value like this:
+  //   newSize = cpool.dev.swapChainInfo.imageExtent;
+  // NOTE #3: Your application *must* call onResized just before starting the
+  // main polling loop; this calls RenderPass::ctorError, builds framebuffers,
+  // and command buffers.
+  WARN_UNUSED_RESULT virtual int onResized(VkExtent2D newSize,
+                                           size_t poolQindex) {
+    if (!pass.vk) {
+      if (pass.ctorError()) {
         return 1;
       }
     }
-    if (rebuilder.end() || rebuilder.submit(0)) {
-      fprintf(stderr, "SwapChainResizeList: rebuilder failed\n");
+    language::Device& dev = cpool.dev;
+    prevSize = dev.swapChainInfo.imageExtent;
+    dev.swapChainInfo.imageExtent = newSize;
+    if (cpool.deviceWaitIdle() || dev.resetSwapChain(cpool, poolQindex)) {
       return 1;
     }
-    vkQueueWaitIdle(pool.q(poolQindex));
+
+    for (size_t i = 0; i < dev.framebufs.size(); i++) {
+      auto& framebuf = dev.framebufs.at(i);
+      if (framebuf.ctorError(dev, pass.vk) ||
+          onResizeFramebuf(dev.swapChainInfo.imageExtent, framebuf, i)) {
+        return 1;
+      }
+    }
+    return 0;
+  }
+
+  // onResizeFramebuf makes your application even simpler. Just rebuild the
+  // vkCommandBuffer objects (using CommandPoolContainer::builder) by overriding
+  // this method. This automatically gets called for each Framebuf.
+  WARN_UNUSED_RESULT virtual int onResizeFramebuf(
+      VkExtent2D /*newSize*/, language::Framebuf& /*framebuf*/,
+      size_t /*framebuf_i*/) {
     return 0;
   }
 };
+
+// SmartCommandBuffer builds on top of CommandBuffer with convenience methods
+// such as: AutoSubmit()
+typedef struct SmartCommandBuffer : public command::CommandBuffer {
+  SmartCommandBuffer(command::CommandPool& cpool_, size_t poolQindex_)
+      : CommandBuffer{cpool_}, poolQindex{poolQindex_} {}
+  // Move constructor.
+  SmartCommandBuffer(SmartCommandBuffer&& other)
+      : CommandBuffer(std::move(other)),
+        poolQindex(other.poolQindex),
+        ctorErrorSuccess(other.ctorErrorSuccess),
+        wantAutoSubmit(other.wantAutoSubmit) {}
+  // The copy constructor is not allowed. The VkCommandBuffer cannot be copied.
+  SmartCommandBuffer(const CommandBuffer& other) = delete;
+
+  virtual ~SmartCommandBuffer();
+  SmartCommandBuffer& operator=(SmartCommandBuffer&&) = delete;
+
+  // ctorError sets up SmartCommandBuffer for one time use by borowing
+  // a pre-allocated command buffer from cpool. This is useful for init
+  // commands because the command buffer is managed by the cpool.
+  //
+  // CommandPool::updateBuffersAndPass can automatically set up a vector of
+  // SmartCommandBuffer -- in that case do not call ctorError().
+  WARN_UNUSED_RESULT int ctorError() {
+    vk = cpool.borrowOneTimeBuffer();
+    if (!vk) {
+      logE("SmartCommandBuffer:%s failed\n", " borrowOneTimeBuffer");
+      return 1;
+    }
+    if (beginOneTimeUse()) {
+      logE("SmartCommandBuffer:%s failed\n", " beginOneTimeUse");
+      return 1;
+    }
+    ctorErrorSuccess = true;
+    return 0;
+  }
+
+  WARN_UNUSED_RESULT int blitImage(memory::Image& src, memory::Image& dst,
+                                   const std::vector<VkImageBlit>& regions,
+                                   VkFilter filter = VK_FILTER_LINEAR) {
+    return CommandBuffer::blitImage(src.vk, src.currentLayout, dst.vk,
+                                    dst.currentLayout, regions, filter);
+  }
+
+  WARN_UNUSED_RESULT int copyImage(memory::Image& src, memory::Image& dst,
+                                   const std::vector<VkImageCopy>& regions) {
+    return CommandBuffer::copyImage(src.vk, src.currentLayout, dst.vk,
+                                    dst.currentLayout, regions);
+  }
+
+  WARN_UNUSED_RESULT int copyImage(
+      memory::Buffer& src, memory::Image& dst,
+      const std::vector<VkBufferImageCopy>& regions) {
+    return copyBufferToImage(src.vk, dst.vk, dst.currentLayout, regions);
+  }
+
+  WARN_UNUSED_RESULT int copyImage(
+      memory::Image& src, memory::Buffer& dst,
+      const std::vector<VkBufferImageCopy>& regions) {
+    return copyImageToBuffer(src.vk, src.currentLayout, dst.vk, regions);
+  }
+
+  // transition is a convenience wrapper around CommandBuffer::barrier().
+  // NOTE: combining all barriers into a one BarrierSet is more efficient,
+  // but it is shorter if you can just write buffer.transition().
+  WARN_UNUSED_RESULT int transition(memory::Image& i, VkImageLayout newLayout) {
+    if (i.currentLayout == newLayout) {
+      // Silently discard no-op transitions.
+      return 0;
+    }
+    command::CommandBuffer::BarrierSet bset;
+    bset.img.push_back(i.makeTransition(newLayout));
+    SubresUpdate<VkImageSubresourceRange>(bset.img.back().subresourceRange)
+        .setMips(0, i.info.mipLevels);
+    if (barrier(bset)) {
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+               ":transition(from %s to %s): makeTransition or barrier",
+               string_VkImageLayout(i.currentLayout),
+               string_VkImageLayout(newLayout));
+      logE("SmartCommandBuffer:%s failed\n", msg);
+      return 1;
+    }
+    i.currentLayout = newLayout;
+    return 0;
+  }
+
+  // autoSubmit() will set a flag so that ~SmartCommandBuffer() will
+  // "auto-submit" the buffer by calling end(), submit(), and vkQueueWaitIdle.
+  // Automatically submitting a buffer when it goes out of scope is useful for
+  // init commands.
+  WARN_UNUSED_RESULT int autoSubmit() {
+    if (!ctorErrorSuccess) {
+      logE("SmartCommandBuffer:%s failed\n",
+           " ctorError not called, autoSubmit");
+      return 1;
+    }
+    wantAutoSubmit = true;
+    return 0;
+  }
+
+  const size_t poolQindex{0};
+
+ protected:
+  bool ctorErrorSuccess{false};
+  bool wantAutoSubmit{false};
+} SmartCommandBuffer;
 
 // PipeBuilder is a builder for command::Pipeline.
 // PipeBuilder immediately installs a new command::Pipeline in the
 // command::RenderPass it gets in its constructor, so instantiating a
 // PipeBuilder is an immediate commitment to completing the Pipeline before
 // calling RenderPass:ctorError().
-typedef struct PipeBuilder : public SwapChainResizeObserver {
+typedef struct PipeBuilder {
   PipeBuilder(language::Device& dev, command::RenderPass& pass)
-      : pipeline{pass.addPipeline(dev)}, depthImage{dev}, depthImageView{dev} {}
+      : dev(dev), pass(pass) {}
   PipeBuilder(PipeBuilder&&) = default;
   PipeBuilder(const PipeBuilder& other) = delete;
 
-  command::Pipeline& pipeline;
+  language::Device& dev;
+  command::RenderPass& pass;
+  std::shared_ptr<command::Pipeline> pipe;
 
-  // addDepthImage adds a depth buffer to the pipeline, choosing the first
-  // of formatChoices that is available.
-  // Because addDepthImage automatically calls onResized, you must pass in a
-  // valid builder for onResized.
+  // addPipelineOnce is automatically called by the other methods in PipeBuilder
+  // to initialize PipeBuilder::pipe from PipeBuilder::pass.addPipeline().
   //
-  // Note: after calling addDepthImage(), the RenderPass holds a reference to
-  // PipeBuilder::depthImage. Do not delete PipeBuilder while RenderPass still
-  // exists. (If not using addDepthImage, feel free to delete PipeBuilder.)
-  WARN_UNUSED_RESULT int addDepthImage(
-      language::Device& dev, command::RenderPass& pass,
-      command::CommandBuilder& builder,
-      const std::vector<VkFormat>& formatChoices);
+  // Though it would not hurt if you call it directly, it is not necessary.
+  void addPipelineOnce() {
+    if (!pipe) {
+      pipe = pass.addPipeline(dev);
+    }
+  }
+
+  // info() returns the PipelineCreateInfo as if this were a command::Pipeline.
+  command::PipelineCreateInfo& info() {
+    addPipelineOnce();
+    return pipe->info;
+  }
+
+  // addDepthImage calls the same method in memory::Pipeline.
+  int addDepthImage(const std::vector<VkFormat>& formatChoices) {
+    addPipelineOnce();
+    return pipe->addDepthImage(formatChoices, pass);
+  }
+
+  // alphaBlendWithPreviousPass() modifies this PipeBuilder to make it
+  // automatically compatible with the dev.framebufs as configured by a previous
+  // pipeline (and possibly even a distict RenderPass - it does not matter).
+  //
+  //
+  int alphaBlendWithPreviousPass();
 
   // addVertexInput initializes a vertex *type* as an input to shaders. The
   // type variable is passed to addVertexInput at compile time to define the
@@ -302,41 +440,33 @@ typedef struct PipeBuilder : public SwapChainResizeObserver {
   //   // addVertexInput calls getAttributes.
   //   if (pipeBuilder.addVertexInput<MyVertex>()) { ... }
   template <typename T>
-  WARN_UNUSED_RESULT int addVertexInput() {
-    return addVertexInputBySize(sizeof(T), T::getAttributes());
+  WARN_UNUSED_RESULT int addVertexInput(uint32_t binding = 0) {
+    return addVertexInputBySize(binding, sizeof(T), T::getAttributes());
   }
 
   // addVertexInputBySize is the non-template version of addVertexInput().
   WARN_UNUSED_RESULT int addVertexInputBySize(
-      size_t nBytes,
+      uint32_t binding, size_t nBytes,
       const std::vector<VkVertexInputAttributeDescription> typeAttributes) {
     vertexInputs.emplace_back();
     VkVertexInputBindingDescription& bindingDescription = vertexInputs.back();
-    bindingDescription.binding = 0;
+    bindingDescription.binding = binding;
     bindingDescription.stride = nBytes;
     bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    pipeline.info.vertsci.vertexBindingDescriptionCount = vertexInputs.size();
-    pipeline.info.vertsci.pVertexBindingDescriptions = vertexInputs.data();
+    command::PipelineCreateInfo& pinfo(info());
+    pinfo.vertsci.vertexBindingDescriptionCount = vertexInputs.size();
+    pinfo.vertsci.pVertexBindingDescriptions = vertexInputs.data();
 
     attributeInputs.insert(attributeInputs.end(), typeAttributes.begin(),
                            typeAttributes.end());
-    pipeline.info.vertsci.vertexAttributeDescriptionCount =
-        attributeInputs.size();
-    pipeline.info.vertsci.pVertexAttributeDescriptions = attributeInputs.data();
+    pinfo.vertsci.vertexAttributeDescriptionCount = attributeInputs.size();
+    pinfo.vertsci.pVertexAttributeDescriptions = attributeInputs.data();
     return 0;
   }
 
-  // onResized allows PipeBuilder to rebuild itself when the swapChain is
-  // resized.
-  WARN_UNUSED_RESULT virtual int onResized(language::Device& dev,
-                                           command::CommandBuilder& builder,
-                                           VkExtent2D oldSize);
-
   std::vector<VkVertexInputBindingDescription> vertexInputs;
   std::vector<VkVertexInputAttributeDescription> attributeInputs;
-  memory::Image depthImage;
-  language::ImageView depthImageView;
 } PipeBuilder;
 
 #ifdef USE_SPIRV_CROSS_REFLECTION
@@ -350,19 +480,18 @@ class DescriptorLibrary {
   std::vector<memory::DescriptorSetLayout> layouts;
 
   // makeSet creates a new DescriptorSet from layouts[layoutI].
-  // A shaders that declares "layout(set = N)" for N > 0 results in
-  // needing a layoutI > 0 here.
+  // Use the layoutI the shader declared with "layout(set = layoutI)".
   //
   // Example usage:
   //   DescriptorLibrary library;
   //   // You MUST call makeDescriptorLibrary to init library.
   //   shaderLibrary.makeDescriptorLibrary(library);
-  //   std::unique_ptr<memory::DescriptorSet> d(library.makeSet(pipeBuilder));
+  //   std::unique_ptr<memory::DescriptorSet> d = library.makeSet(0);
   //   if (!d) {
   //     handleErrors;
   //   }
-  std::unique_ptr<memory::DescriptorSet> makeSet(PipeBuilder& pipe,
-                                                 size_t layoutI = 0);
+  //   pipe.info.setLayouts.emplace_back(library.layouts.at(0).vk);
+  std::unique_ptr<memory::DescriptorSet> makeSet(size_t layoutI);
 
  protected:
   friend class ShaderLibrary;
@@ -384,8 +513,12 @@ struct ShaderLibraryInternal;
 // "Shader does not match other Shader's layouts. Performance penalty."
 class ShaderLibrary {
  public:
-  ShaderLibrary(language::Device& dev) : dev{dev}, _i(nullptr) {}
+  ShaderLibrary(language::Device& dev) : dev(dev), _i(nullptr) {}
   virtual ~ShaderLibrary();
+
+  // descriptorSetMaxCopies is a hint to ShaderLibrary to allocate room in the
+  // descriptor pool for multiple copies of the types found by reflection.
+  size_t descriptorSetMaxCopies{1};
 
   // load creates and calls loadSPV() on a Shader. If loadSPV() fails, it
   // returns an empty shared_ptr.
@@ -433,7 +566,9 @@ class ShaderLibrary {
   //
   // Note: you MUST call load() at least once before calling
   // makeDescriptorLibrary.
-  int makeDescriptorLibrary(DescriptorLibrary& descriptorLibrary);
+  int makeDescriptorLibrary(DescriptorLibrary& descriptorLibrary,
+                            const std::multiset<VkDescriptorType>& wantTypes =
+                                std::multiset<VkDescriptorType>());
 
  protected:
   language::Device& dev;

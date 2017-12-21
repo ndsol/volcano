@@ -1,0 +1,52 @@
+# Copyright (c) 2017 the Volcano Authors. Licensed under GPLv3.
+import("//src/gn/toolchain/android/settings.gni")
+import("//src/gn/vendor/subgnDefines.gni")
+
+if (is_win) {
+  import("//src/gn/toolchain/win/settings.gni")
+
+  libskia = "skia.lib"
+  libskia_os_args = " msvc = " + visual_studio_version +
+    " windk = \"" + visual_studio_path + "\"" +
+    " vchostdir = \"" + "VC/Tools/MSVC/14.11.25503" + "\"" +
+    " use_dynamic_crt = "
+  if (use_dynamic_crt) {
+    libskia_os_args += "true"
+  } else {
+    libskia_os_args += "false"
+  }
+} else {
+  libskia = "libskia.a"
+  libskia_os_args = ""
+}
+
+declare_args() {
+  libskia_path = "$root_out_dir/skia/$libskia"
+  libskia_extra_args = ""
+}
+
+skia_args = "skia_enable_tools = false " +
+  "skia_use_system_libjpeg_turbo = false " +
+  # ndk_api: Vulkan requires API >= 24, even though skia works on earlier.
+  "ndk_api = $android_ndk_major_version" +
+  libskia_os_args +
+  libskia_extra_args
+
+if (android_variants_dir != "" && current_os != "android") {
+  # Do not generate output twice. When android_variants_dir is set, builds for
+  # the host (current_os != "android") generate it for the target toolchain.
+} else {
+  exec_script("//src/gn/vendor/subninja.py",
+    [ # arguments
+      "--addpath=" + rebase_path("../../../../vendor/subgn"),
+      "--chdir=skia",
+      "--exec=gn",
+      "-q",
+      "gen", ".",
+      "--root=../" + rebase_path(volcano_prefix + "vendor/skia", root_build_dir),
+      "--args=" + skia_args,
+    ],
+    "generate output",             # input_conversion
+    [ volcano_prefix + "vendor/skia/BUILD.gn" ]  # file_dependencies
+  )
+}

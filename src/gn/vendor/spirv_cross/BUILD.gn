@@ -1,0 +1,45 @@
+# Copyright 2017 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+import("//src/gn/vendor/subgnDefines.gni")
+if (is_win) {
+  import("//src/gn/toolchain/win/settings.gni")
+}
+
+declare_args() {
+  use_spirv_cross_exceptions = false
+  spirv_cross = rebase_path(volcano_prefix + "vendor/spirv_cross", ".",
+                            rebase_path(target_out_dir, root_build_dir)) + "/"
+}
+
+config("spirv_cross_config") {
+  if (!use_spirv_cross_exceptions) {
+    defines = [ "SPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS" ]
+  }
+  if (is_win) {
+    defines += [ "_HAS_EXCEPTIONS=0" ] # disable exceptions in STL
+    if (!use_dynamic_crt) {
+      defines += [ "_STATIC_CPPLIB" ] # also needed to disable exceptions
+    }
+  }
+}
+
+source_set("compiler") {
+  sources = [
+    spirv_cross + "spirv_cfg.cpp",
+    spirv_cross + "spirv_cross.cpp",
+  ]
+  configs += [ ":spirv_cross_config" ]
+}
+
+source_set("compilerGLSL") {
+  sources = [ spirv_cross + "spirv_glsl.cpp" ]
+  deps = [ ":compiler" ]
+  configs += [ ":spirv_cross_config" ]
+}
+
+group("spirv_cross") {
+  deps = [
+    ":compilerGLSL",
+  ]
+  public_configs = [ ":spirv_cross_config" ]
+}

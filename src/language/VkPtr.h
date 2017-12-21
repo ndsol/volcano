@@ -1,23 +1,79 @@
 /* Copyright (c) 2017 the Volcano Authors. Licensed under the GPLv3.
  */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <typeinfo>
 #ifndef _MSC_VER
 #include <cxxabi.h>
 #endif
-#include <vulkan/vulkan.h>
 
 #pragma once
+
+// On non-64-bit platforms, Vulkan uses typedefs. Then a standards-conforming
+// C++ compiler will complain that:
+//   MemoryRequirements(language::Device& dev, VkImage img) and
+//   MemoryRequirements(language::Device& dev, VkBuffer buf)
+// are no different. typedefs do not create a new type, and vulkan.h has this:
+// #define VK_DEFINE_NON_DISPATCHABLE_HANDLE(object) typedef uint64_t object;
+//
+// Fortunately, vulkan.h also permits VK_DEFINE_NON_DISPATCHABLE_HANDLE to be
+// "overridden":
+#if defined(__LP64__) || defined(_WIN64) ||                            \
+    (defined(__x86_64__) && !defined(__ILP32__)) || defined(_M_X64) || \
+    defined(__ia64) || defined(_M_IA64) || defined(__aarch64__) ||     \
+    defined(__powerpc64__)
+
+// 64-bit platform. Leave vulkan.h to define VK_DEFINE_NON_DISPATCHABLE_HANDLE.
+
+#else  // Not a 64-bit platform. Fix the bug:
+
+#ifdef _MSC_VER
+#define VOLCANO_TYPEDEF_STRUCT(o) \
+  __pragma(pack(push, 1)) typedef struct o __pragma(pack(pop))
+#else
+#define VOLCANO_TYPEDEF_STRUCT(o) typedef struct __attribute__((__packed__)) o
+#endif
+
+#define VK_DEFINE_NON_DISPATCHABLE_HANDLE(object)  \
+  VOLCANO_TYPEDEF_STRUCT(volcano_##object) {       \
+    volcano_##object() { hnd = 0; };               \
+    volcano_##object(std::nullptr_t) { hnd = 0; }; \
+    operator bool() const { return !!hnd; };       \
+    uint64_t hnd;                                  \
+  }                                                \
+  object;
+
+#endif  // If 64-bit platform.
+
+#ifdef __ANDROID__
+#include <common/vulkan_wrapper.h>
+#else
+#include <vulkan/vulkan.h>
+#endif
+
+#ifdef VOLCANO_TYPEDEF_STRUCT
+#undef VOLCANO_TYPEDEF_STRUCT
+
+#undef VK_NULL_HANDLE
+#define VK_NULL_HANDLE nullptr
+#endif /*VOLCANO_TYPEDEF_STRUCT*/
+
+void logV(const char *fmt, ...);  // Verbose log.
+void logD(const char *fmt, ...);  // Debug log.
+void logI(const char *fmt, ...);  // Info log.
+void logW(const char *fmt, ...);  // Warn log.
+void logE(const char *fmt, ...);  // Error log.
+void logF(const char *fmt, ...);  // Fatal log.
 
 #define VKDEBUG(...)
 #ifndef VKDEBUG
 #define VKDEBUG(...)                                          \
-  {                                                           \
+  do {                                                        \
     auto typeID = getTypeID_you_must_free_the_return_value(); \
-    fprintf(stderr, __VA_ARGS__);                             \
+    logD(__VA_ARGS__);                                        \
     free(typeID);                                             \
-  }
+  } while (0)
 #endif
 
 // class VkPtr wraps the object returned from some create...() function and
@@ -64,6 +120,23 @@ class VkPtr {
   }
   VkPtr(const VkPtr &) = delete;
 
+  // Only allow access to the object if it has been allocated.
+  operator T() const {
+    if (object) {
+      return object;
+    }
+    auto typeID = getTypeID_you_must_free_the_return_value();
+    // If your app dies with this error, check that you are casting the return
+    // value to (bool) so the compiler uses operator bool() below.
+    logF("FATAL: VkPtr::operator %s() on an empty VkPtr!\n", typeID);
+    free(typeID);
+    exit(1);
+    return VK_NULL_HANDLE;
+  }
+
+  // Allow testing the VkPtr if only bool is requested.
+  operator bool() const { return object; }
+
   // Constructor that has a destroy_fn which takes two arguments: the obj and
   // the allocator.
   explicit VkPtr(VKAPI_ATTR void(VKAPI_CALL *destroy_fn)(
@@ -71,8 +144,8 @@ class VkPtr {
     object = VK_NULL_HANDLE;
     if (!destroy_fn) {
       auto typeID = getTypeID_you_must_free_the_return_value();
-      fprintf(stderr, "VkPtr<%s>::VkPtr(T,allocator) with destroy_fn=%p\n",
-              typeID, destroy_fn);
+      logF("VkPtr<%s>::VkPtr(T,allocator) with destroy_fn=%p\n", typeID,
+           destroy_fn);
       free(typeID);
       exit(1);
     }
@@ -93,8 +166,8 @@ class VkPtr {
     object = VK_NULL_HANDLE;
     if (!destroy_fn) {
       auto typeID = getTypeID_you_must_free_the_return_value();
-      fprintf(stderr, "VkPtr<%s>::VkPtr(inst,T,allocator) with destroy_fn=%p\n",
-              typeID, destroy_fn);
+      logF("VkPtr<%s>::VkPtr(inst,T,allocator) with destroy_fn=%p\n", typeID,
+           destroy_fn);
       free(typeID);
       exit(1);
     }
@@ -117,8 +190,8 @@ class VkPtr {
     object = VK_NULL_HANDLE;
     if (!destroy_fn) {
       auto typeID = getTypeID_you_must_free_the_return_value();
-      fprintf(stderr, "VkPtr<%s>::VkPtr(dev,T,allocator) with destroy_fn=%p\n",
-              typeID, destroy_fn);
+      logF("VkPtr<%s>::VkPtr(dev,T,allocator) with destroy_fn=%p\n", typeID,
+           destroy_fn);
       free(typeID);
       exit(1);
     }
@@ -137,7 +210,7 @@ class VkPtr {
   virtual ~VkPtr() { reset(); }
 
   void reset() {
-    if (object == VK_NULL_HANDLE) {
+    if (!object) {
       return;
     }
     if (deleterT) {
@@ -160,15 +233,12 @@ class VkPtr {
     object = VK_NULL_HANDLE;
   }
 
-  // Allow const access to the object.
-  operator T() const { return object; }
-
   // Restrict non-const access. The object must be VK_NULL_HANDLE before it can
   // be written. Call reset() if necessary.
   T *operator&() {
-    if (object != VK_NULL_HANDLE) {
+    if (object) {
       auto typeID = getTypeID_you_must_free_the_return_value();
-      fprintf(stderr, "FATAL: VkPtr<%s>::operator& before reset()\n", typeID);
+      logF("FATAL: VkPtr<%s>::operator& before reset()\n", typeID);
       free(typeID);
       exit(1);
     }
@@ -188,7 +258,7 @@ class VkPtr {
   VkInstance *pInst;
   VkDevice *pDev;
 
-  char *getTypeID_you_must_free_the_return_value() {
+  char *getTypeID_you_must_free_the_return_value() const {
     int status;
 #ifdef _MSC_VER
     status = 0;

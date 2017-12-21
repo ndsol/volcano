@@ -1,0 +1,210 @@
+# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2017 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+import("//src/gn/vendor/subgnDefines.gni")
+if (is_win) {
+  import("//src/gn/toolchain/win/settings.gni")
+}
+
+declare_args() {
+  is_spirv_remap_enabled = false
+  use_hlsl = true
+  glslang = rebase_path(volcano_prefix + "vendor/glslang", ".",
+                        rebase_path(target_out_dir, root_build_dir)) + "/"
+}
+
+config("glslangVulkan_gen_config") {
+  if (is_clang) {
+    cflags = [ "-Wno-newline-eof" ]
+  }
+  include_dirs = [ root_gen_dir ]
+}
+
+config("glslang_config") {
+  include_dirs = [ glslang ]
+  defines = []
+  if (use_hlsl) {
+    defines += [ "ENABLE_HLSL" ]
+  }
+  if (is_linux || is_android || is_mac) {
+    defines += [ "GLSLANG_OSINCLUDE_UNIX" ]
+  } else if (is_win) {
+    defines += [ "GLSLANG_OSINCLUDE_WIN32" ]
+    include_dirs += [ glslang + "/OGLCompilersDll" ]
+  } else {
+    assert(false, "Unsupported platform.")
+  }
+}
+
+config("glslang_local_config") {
+  if (!is_win) {
+    cflags = [
+      "-Wno-strict-overflow",
+      "-Wno-unused-function",
+      "-Wno-unused-parameter",
+      "-Wno-unused-variable",
+      "-Wno-missing-field-initializers",
+      "-Wno-ignored-qualifiers",
+      "-Wno-sign-compare",
+      "-Wno-reorder",
+    ]
+
+    if (is_clang) {
+      cflags += [
+        "-Wno-extra-semi",
+        "-Wno-tautological-constant-out-of-range-compare",
+        "-Wno-reorder",
+      ]
+    }
+  } else { # is_win
+    defines = [ "_HAS_EXCEPTIONS=0" ] # disable exceptions in STL
+    if (!use_dynamic_crt) {
+      defines += [ "_STATIC_CPPLIB" ] # also needed to disable exceptions
+    }
+  }
+}
+
+config("glslang_maybe_uninitialized") {
+  if (!is_win) {
+    cflags = [ "-Wno-maybe-uninitialized" ]
+  }
+}
+
+source_set("OGLCompiler") {
+  sources = [
+    glslang + "OGLCompilersDLL/InitializeDll.cpp",
+    glslang + "OGLCompilersDLL/InitializeDll.h",
+  ]
+
+  all_dependent_configs = [ ":glslang_config" ]
+  configs += [ ":glslang_local_config" ]
+}
+
+source_set("HLSL") {
+  sources = [
+    glslang + "hlsl/hlslAttributes.cpp",
+    glslang + "hlsl/hlslParseHelper.cpp",
+    glslang + "hlsl/hlslScanContext.cpp",
+    glslang + "hlsl/hlslOpMap.cpp",
+    glslang + "hlsl/hlslTokenStream.cpp",
+    glslang + "hlsl/hlslGrammar.cpp",
+    glslang + "hlsl/hlslParseables.cpp",
+  ]
+
+  all_dependent_configs = [ ":glslang_config" ]
+  configs += [ ":glslang_local_config" ]
+}
+
+static_library("glslang-default-resource-limits") {
+  sources = [
+    glslang + "StandAlone/ResourceLimits.cpp",
+  ]
+
+  all_dependent_configs = [ ":glslang_config" ]
+  configs += [ ":glslang_local_config" ]
+}
+
+static_library("glslang") {
+  sources = [
+    glslang + "glslang/MachineIndependent/glslang_tab.cpp",
+    glslang + "glslang/MachineIndependent/Constant.cpp",
+    glslang + "glslang/MachineIndependent/iomapper.cpp",
+    glslang + "glslang/MachineIndependent/InfoSink.cpp",
+    glslang + "glslang/MachineIndependent/Initialize.cpp",
+    glslang + "glslang/MachineIndependent/IntermTraverse.cpp",
+    glslang + "glslang/MachineIndependent/Intermediate.cpp",
+    glslang + "glslang/MachineIndependent/ParseContextBase.cpp",
+    glslang + "glslang/MachineIndependent/ParseHelper.cpp",
+    glslang + "glslang/MachineIndependent/PoolAlloc.cpp",
+    glslang + "glslang/MachineIndependent/RemoveTree.cpp",
+    glslang + "glslang/MachineIndependent/Scan.cpp",
+    glslang + "glslang/MachineIndependent/ShaderLang.cpp",
+    glslang + "glslang/MachineIndependent/SymbolTable.cpp",
+    glslang + "glslang/MachineIndependent/Versions.cpp",
+    glslang + "glslang/MachineIndependent/intermOut.cpp",
+    glslang + "glslang/MachineIndependent/limits.cpp",
+    glslang + "glslang/MachineIndependent/linkValidate.cpp",
+    glslang + "glslang/MachineIndependent/parseConst.cpp",
+    glslang + "glslang/MachineIndependent/reflection.cpp",
+    glslang + "glslang/MachineIndependent/preprocessor/Pp.cpp",
+    glslang + "glslang/MachineIndependent/preprocessor/PpAtom.cpp",
+    glslang + "glslang/MachineIndependent/preprocessor/PpContext.cpp",
+    glslang + "glslang/MachineIndependent/preprocessor/PpScanner.cpp",
+    glslang + "glslang/MachineIndependent/preprocessor/PpTokens.cpp",
+    glslang + "glslang/MachineIndependent/propagateNoContraction.cpp",
+    glslang + "glslang/GenericCodeGen/CodeGen.cpp",
+    glslang + "glslang/GenericCodeGen/Link.cpp",
+  ]
+
+  if (is_linux || is_android || is_mac) {
+    sources += [ glslang + "glslang/OSDependent/Unix/ossource.cpp" ]
+  } else if (is_win) {
+    sources += [
+      glslang + "glslang/OSDependent/Windows/main.cpp",
+      glslang + "glslang/OSDependent/Windows/ossource.cpp",
+    ]
+  } else {
+    assert(false, "Unsupported platform.")
+  }
+
+  all_dependent_configs = [ ":glslang_config" ]
+  configs += [ ":glslang_local_config" ]
+  deps = [ ":OGLCompiler" ]
+  if (use_hlsl) {
+    deps += [ ":HLSL" ]
+  }
+}
+
+static_library("SPIRV") {
+  public = [ "SPIRV/spirv.hpp" ]
+  sources = [
+    glslang + "SPIRV/GlslangToSpv.cpp",
+    glslang + "SPIRV/InReadableOrder.cpp",
+    glslang + "SPIRV/Logger.cpp",
+    glslang + "SPIRV/SPVRemapper.cpp",
+    glslang + "SPIRV/SpvBuilder.cpp",
+    glslang + "SPIRV/disassemble.cpp",
+    glslang + "SPIRV/doc.cpp",
+  ]
+
+  all_dependent_configs = [ ":glslang_config" ]
+  configs += [ ":glslang_local_config" ]
+  deps = [ ":glslang" ]
+}
+
+executable("glslangValidator") {
+  sources = [ glslang + "StandAlone/StandAlone.cpp" ]
+
+  deps = [
+    ":glslang",
+    ":SPIRV",
+    ":OGLCompiler",
+    ":glslang-default-resource-limits",
+  ]
+  if (use_hlsl) {
+    deps += [ ":HLSL" ]
+  }
+
+  configs += [
+    ":glslang_local_config",
+    ":glslang_maybe_uninitialized",
+    ":glslang_config",
+  ]
+}
+
+if (is_spirv_remap_enabled) {
+  executable("spirv-remap") {
+    sources = [ glslang + "StandAlone/spirv-remap.cpp" ]
+
+    deps = [
+      ":glslang",
+      ":SPIRV",
+      ":glslang-default-resource-limits",
+    ]
+
+    configs += [
+      ":glslang_local_config",
+      ":glslang_config",
+    ]
+  }
+}

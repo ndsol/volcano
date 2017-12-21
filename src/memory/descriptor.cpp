@@ -5,8 +5,8 @@
 
 namespace memory {
 
-int DescriptorPool::ctorError(uint32_t maxSets,
-                              std::vector<VkDescriptorType> maxDescriptors) {
+int DescriptorPool::ctorError(
+    uint32_t maxSets, const std::multiset<VkDescriptorType>& descriptors) {
   VkDescriptorPoolCreateInfo VkInit(info);
   info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 
@@ -14,17 +14,24 @@ int DescriptorPool::ctorError(uint32_t maxSets,
   // the pPoolSizes array then the pool will be created with enough storage
   // for the total number of descriptors of each type."
   //
-  // The Vulkan driver will count the number of times each VkDescriptorType
-  // occurs. This just translates the VkDescriptorType into a request for
-  // 1 descriptor of that type.
+  // Vulkan drivers may need the types grouped though, so use std::multiset to
+  // guarantee the types are grouped.
   std::vector<VkDescriptorPoolSize> poolSizes;
-  for (auto& dType : maxDescriptors) {
+  for (auto& dType : descriptors) {
+    if (!poolSizes.empty()) {
+      auto& last = poolSizes.back();
+      if (last.type == dType) {
+        last.descriptorCount++;
+        continue;
+      }
+    }
     poolSizes.emplace_back();
     auto& poolSize = poolSizes.back();
     VkOverwrite(poolSize);
     poolSize.type = dType;
     poolSize.descriptorCount = 1;
   }
+
   info.poolSizeCount = poolSizes.size();
   info.pPoolSizes = poolSizes.data();
   info.maxSets = maxSets;
@@ -32,8 +39,8 @@ int DescriptorPool::ctorError(uint32_t maxSets,
   vk.reset();
   VkResult v = vkCreateDescriptorPool(dev.dev, &info, dev.dev.allocator, &vk);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "vkCreateDescriptorPool", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkCreateDescriptorPool", v,
+         string_VkResult(v));
     return 1;
   }
   vk.allocator = dev.dev.allocator;
@@ -58,8 +65,8 @@ int DescriptorSetLayout::ctorError(
   VkResult v =
       vkCreateDescriptorSetLayout(dev.dev, &info, dev.dev.allocator, &vk);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "vkCreateDescriptorSetLayout", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkCreateDescriptorSetLayout", v,
+         string_VkResult(v));
     return 1;
   }
   return 0;
@@ -68,8 +75,7 @@ int DescriptorSetLayout::ctorError(
 DescriptorSet::~DescriptorSet() {
   VkResult v = vkFreeDescriptorSets(pool.dev.dev, pool.vk, 1, &vk);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "vkFreeDescriptorSets", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "vkFreeDescriptorSets", v, string_VkResult(v));
     exit(1);
   }
 }
@@ -85,14 +91,12 @@ int DescriptorSet::ctorError(const DescriptorSetLayout& layout) {
 
   VkResult v = vkAllocateDescriptorSets(pool.dev.dev, &info, &vk);
   if (v != VK_SUCCESS) {
-    fprintf(stderr,
-            "vkAllocateDescriptorSets failed: %d (%s)\n"
-            "The Vulkan spec suggests:\n"
-            "1. Ignore the exact error code returned.\n"
-            "2. Try creating a new DescriptorPool.\n"
-            "3. Retry DescriptorSet::ctorError().\n"
-            "4. If that fails, abort.\n",
-            v, string_VkResult(v));
+    logE("vkAllocateDescriptorSets failed: %d (%s)\n", v, string_VkResult(v));
+    logE("The Vulkan spec suggests:\n");
+    logE("1. Ignore the exact error code returned.\n");
+    logE("2. Try creating a new DescriptorPool.\n");
+    logE("3. Retry DescriptorSet::ctorError().\n");
+    logE("4. If that fails, abort.\n");
     return 1;
   }
   return 0;
@@ -102,10 +106,8 @@ int DescriptorSet::write(uint32_t binding,
                          const std::vector<VkDescriptorImageInfo> imageInfo,
                          uint32_t arrayI /*= 0*/) {
   if (binding > types.size()) {
-    fprintf(stderr,
-            "DescriptorSet::write(%u, imageInfo): binding=%u with only %zu "
-            "bindings\n",
-            binding, binding, types.size());
+    logE("DescriptorSet::write(%u, %s): binding=%u with only %zu bindings\n",
+         binding, "imageInfo", binding, types.size());
     return 1;
   }
   switch (types.at(binding)) {
@@ -115,9 +117,8 @@ int DescriptorSet::write(uint32_t binding,
     case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
       break;
     default:
-      fprintf(stderr,
-              "DescriptorSet::write(%u, imageInfo): binding=%u has type %s\n",
-              binding, binding, string_VkDescriptorType(types.at(binding)));
+      logE("DescriptorSet::write(%u, %s): binding=%u has type %s\n", binding,
+           "imageInfo", binding, string_VkDescriptorType(types.at(binding)));
       return 1;
   }
   VkWriteDescriptorSet VkInit(w);
@@ -135,10 +136,8 @@ int DescriptorSet::write(uint32_t binding,
                          const std::vector<VkDescriptorBufferInfo> bufferInfo,
                          uint32_t arrayI /*= 0*/) {
   if (binding > types.size()) {
-    fprintf(stderr,
-            "DescriptorSet::write(%u, bufferInfo): binding=%u with only %zu "
-            "bindings\n",
-            binding, binding, types.size());
+    logE("DescriptorSet::write(%u, %s): binding=%u with only %zu bindings\n",
+         binding, "bufferInfo", binding, types.size());
     return 1;
   }
   switch (types.at(binding)) {
@@ -148,9 +147,8 @@ int DescriptorSet::write(uint32_t binding,
     case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
       break;
     default:
-      fprintf(stderr,
-              "DescriptorSet::write(%u, bufferInfo): binding=%u has type %s\n",
-              binding, binding, string_VkDescriptorType(types.at(binding)));
+      logE("DescriptorSet::write(%u, %s): binding=%u has type %s\n", binding,
+           "bufferInfo", binding, string_VkDescriptorType(types.at(binding)));
       return 1;
   }
   VkWriteDescriptorSet VkInit(w);
@@ -168,10 +166,8 @@ int DescriptorSet::write(uint32_t binding,
                          const std::vector<VkBufferView> texelBufferViewInfo,
                          uint32_t arrayI /*= 0*/) {
   if (binding > types.size()) {
-    fprintf(stderr,
-            "DescriptorSet::write(%u, VkBufferView): binding=%u with only %zu "
-            "bindings\n",
-            binding, binding, types.size());
+    logE("DescriptorSet::write(%u, %s): binding=%u with only %zu bindings\n",
+         binding, "VkBufferView", binding, types.size());
     return 1;
   }
   switch (types.at(binding)) {
@@ -179,10 +175,8 @@ int DescriptorSet::write(uint32_t binding,
     case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
       break;
     default:
-      fprintf(
-          stderr,
-          "DescriptorSet::write(%u, VkBufferView): binding=%u has type %s\n",
-          binding, binding, string_VkDescriptorType(types.at(binding)));
+      logE("DescriptorSet::write(%u, %s): binding=%u has type %s\n", binding,
+           "VkBufferView", binding, string_VkDescriptorType(types.at(binding)));
       return 1;
   }
   VkWriteDescriptorSet VkInit(w);

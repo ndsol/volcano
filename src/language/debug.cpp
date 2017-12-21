@@ -11,19 +11,21 @@ namespace language {
 namespace {  // use an anonymous namespace to hide all its contents (only
              // reachable from this file)
 
-static uint64_t debugLineCount = 0;
-static uint32_t suppressState = 0;
-static VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallback(
+VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallback(
     VkFlags msgFlags, VkDebugReportObjectTypeEXT objType, uint64_t srcObject,
-    size_t location, int32_t msgCode, const char *pLayerPrefix,
-    const char *pMsg, void *pUserData) {
+    size_t location, int32_t msgCode, const char* pLayerPrefix,
+    const char* pMsg, void* pUserData) {
   (void)objType;
   (void)srcObject;
   (void)location;
   (void)pUserData;
+
+#if !defined(_MSC_VER) && !defined(__ANDROID__)
+  // Suppress the most common log messages.
+  static uint64_t debugLineCount = 0;
+  static uint32_t suppressState = 0;
   debugLineCount++;
 
-  // Suppress the most common log messages.
   if (!strcmp(pLayerPrefix, "DebugReport")) {
     if (!strcmp(pMsg, "Added callback")) {
       return false;
@@ -84,22 +86,21 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallback(
     }
   }
   suppressState = 0;
+#endif /* Suppress the most common log messages. */
 
-  char level[16];
-  char *plevel = &level[0];
-  if (msgFlags & VK_DEBUG_REPORT_WARNING_BIT_EXT) *plevel++ = 'W';
-  if (msgFlags & VK_DEBUG_REPORT_INFORMATION_BIT_EXT) *plevel++ = 'I';
-  if (msgFlags & VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT) *plevel++ = 'P';
-  if (msgFlags & VK_DEBUG_REPORT_ERROR_BIT_EXT) *plevel++ = 'E';
-  if (msgFlags & VK_DEBUG_REPORT_DEBUG_BIT_EXT) *plevel++ = 'D';
-  *plevel = 0;
-  fprintf(stderr, "%s %s: code%d: %s\n", level, pLayerPrefix, msgCode, pMsg);
+  if (msgFlags & VK_DEBUG_REPORT_DEBUG_BIT_EXT) {
+    logD("%s: code%d: %s\n", pLayerPrefix, msgCode, pMsg);
+  } else if (msgFlags & VK_DEBUG_REPORT_INFORMATION_BIT_EXT) {
+    logI("%s: code%d: %s\n", pLayerPrefix, msgCode, pMsg);
+  } else if (msgFlags & VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT) {
+    logI("PerfWarn: %s: code%d: %s\n", pLayerPrefix, msgCode, pMsg);
+  } else if (msgFlags & VK_DEBUG_REPORT_WARNING_BIT_EXT) {
+    logW("%s: code%d: %s\n", pLayerPrefix, msgCode, pMsg);
+  } else if (msgFlags & VK_DEBUG_REPORT_ERROR_BIT_EXT) {
+    logE("%s: code%d: %s\n", pLayerPrefix, msgCode, pMsg);
+  }
   /*
-   * false indicates that layer should not bail-out of an
-   * API call that had validation failures. This may mean that the
-   * app dies inside the driver due to invalid parameter(s).
-   * That's what would happen without validation layers, so we'll
-   * keep that behavior here.
+   * Vulkan 1.0.64 spec clarifies that this should always return false.
    */
   return false;
 }
@@ -130,7 +131,7 @@ int Instance::initDebug() {
       (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(
           this->vk, "vkCreateDebugReportCallbackEXT");
   if (!pCreateDebugReportCallback) {
-    fprintf(stderr, "Failed to dlsym(vkCreateDebugReportCallbackEXT)\n");
+    logE("Failed to dlsym(vkCreateDebugReportCallbackEXT)\n");
     return 1;
   }
 
@@ -138,15 +139,15 @@ int Instance::initDebug() {
       (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
           this->vk, "vkDestroyDebugReportCallbackEXT");
   if (!this->pDestroyDebugReportCallbackEXT) {
-    fprintf(stderr, "Failed to dlsym(vkDestroyDebugReportCallbackEXT)\n");
+    logE("Failed to dlsym(vkDestroyDebugReportCallbackEXT)\n");
     return 1;
   }
 
   VkResult v = pCreateDebugReportCallback(this->vk, &dinfo, pAllocator,
                                           &this->debugReport);
   if (v != VK_SUCCESS) {
-    fprintf(stderr, "%s failed: %d (%s)\n", "pCreateDebugReportCallback", v,
-            string_VkResult(v));
+    logE("%s failed: %d (%s)\n", "pCreateDebugReportCallback", v,
+         string_VkResult(v));
     return 1;
   }
   return 0;
