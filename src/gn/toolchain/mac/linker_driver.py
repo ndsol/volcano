@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2016 The Chromium Authors. All rights reserved.
 # Copyright (c) 2017 the Volcano Authors. All rights reserved.
 # Licensed under the GPLv3.
@@ -51,7 +51,7 @@ def Main(args):
   if len(args) < 2:
     raise RuntimeError("Usage: linker_driver.py [linker-invocation]")
 
-  for i in xrange(len(args)):
+  for i in range(len(args)):
     if args[i] != '--developer_dir':
       continue
     os.environ['DEVELOPER_DIR'] = args[i + 1]

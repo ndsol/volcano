@@ -6,9 +6,9 @@ glfw = rebase_path(volcano_prefix + "vendor/glfw", ".",
                    rebase_path(target_out_dir, root_build_dir)) + "/"
 
 config("glfw_config") {
-  if (is_android || is_mac || is_ios || is_tvos || is_linux) {
+  if (is_android || is_linux) {
     defines = [ "_GLFW_X11" ]
-  } else if (is_mac) {
+  } else if (is_mac || is_ios || is_tvos) {
     defines = [
       "_GLFW_COCOA",
       "_GLFW_USE_RETINA",
@@ -29,6 +29,10 @@ config("glfw_local_config") {
       "-Wno-unused-parameter",
       "-Wno-missing-field-initializers",
     ]
+    if (is_mac || is_ios || is_tvos) {
+      # Add -fno-common to work around a bug in Apple's GCC
+      cflags += [ "-fno-common" ]
+    }
   }
 }
 
@@ -52,14 +56,15 @@ source_set("glfw") {
     glfw + "deps/getopt.c",
   ]
 
-  if (is_mac) {
+  if (is_mac || is_ios || is_tvos) {
     libs = [
       "Cocoa.framework",
       "CoreFoundation.framework",
-      "CoreGraphics.framework",
       "CoreVideo.framework",
       "IOKit.framework",
-      "OpenGL.framework",
+      "Metal.framework",
+      "QuartzCore.framework",
+      "c++",
     ]
 
     sources += [
@@ -70,10 +75,10 @@ source_set("glfw") {
       glfw + "src/cocoa_time.c",
       glfw + "src/posix_thread.c",
       glfw + "src/nsgl_context.m",
-      glfw + "src/egl_context.m",
+      glfw + "src/egl_context.c",
       glfw + "src/osmesa_context.c",
     ]
-  } else if (is_android || is_mac || is_ios || is_tvos || is_linux) {
+  } else if (is_android || is_linux) {
     defines += [
       "_GLFW_X11",
     ]

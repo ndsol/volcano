@@ -15,30 +15,42 @@
  * For example, the following code uses src/language to create a vulkan window:
  *
  * // this file is yourprogram.cpp:
+ * #define GLFW_INCLUDE_VULKAN
+ * #include <GLFW/glfw3.h>
+ *
+ * #ifdef _WIN32
+ * #define GLFW_EXPOSE_NATIVE_WIN32
+ * #include <GLFW/glfw3native.h>
+ * #endif
+ *
  * #include <src/language/language.h>
  *
  * // Wrap the function glfwCreateWindowSurface for Instance::ctorError():
- * static VkResult createWindowSurface(language::Instance& inst, void * window)
+ * static VkResult createWindowSurface(language::Instance& inst, void* window)
  * {
- *   return glfwCreateWindowSurface(inst.vk, (GLFWwindow *) window, nullptr,
- *     &inst.surface);
+ *   return glfwCreateWindowSurface(inst.vk, (GLFWwindow*) window, nullptr,
+ *                                  &inst.surface);
  * }
  *
  * int main() {
+ *   glfwInit();
+ *   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
  *   const int WIDTH = 800, HEIGHT = 600;
- *   GLFWwindow * window = glfwCreateWindow(WIDTH, HEIGHT...);
+ *   GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT...);
  *   unsigned int glfwExtCount = 0;
- *   const char ** glfwExts = glfwGetRequiredInstanceExtensions(&glfwExtCount);
+ *   const char** glfwExts = glfwGetRequiredInstanceExtensions(&glfwExtCount);
  *   language::Instance inst;
  *   if (inst.ctorError(glfwExts, glfwExtCount, createWindowSurface, window)) {
  *     return 1;
  *   }
- *   int r = inst.open({WIDTH, HEIGHT});
- *   if (r != 0) exit(1);
+ *   if (inst.open({WIDTH, HEIGHT})) {
+ *     return 1;
+ *   }
  *   while(!glfwWindowShouldClose(window)) {
- *     glfwPollEvents();
+ *     glfwPollEvents();  // This is the main loop.
  *   }
  *   glfwDestroyWindow(window);
+ *   glfwTerminate();
  *   return r;
  * }
  */

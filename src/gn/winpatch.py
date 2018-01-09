@@ -67,7 +67,7 @@ if __name__ == "__main__":
                   line))
   f.close()
 
-  vvs = "vendor/vulkansamples/"
+  vvs = "vendor/vulkansamples/submodules/Vulkan-LoaderAndValidationLayers/"
   sample_patch = re.compile(("pVersionStruct->pfn(Get(Instance|Device|"
       "PhysicalDevice)ProcAddr) = vk((GetInstance|GetDevice|"
       "_layerGetPhysicalDevice)ProcAddr);$"))

@@ -113,7 +113,17 @@ int Device::initSurfaceFormatAndPresentMode() {
   if (r) {
     return r;
   }
-  return choosePresentMode(presentModes, swapChainInfo.presentMode);
+  if (choosePresentMode(presentModes, swapChainInfo.presentMode)) {
+    return 1;
+  }
+#ifdef _WIN32
+  if (swapChainInfo.presentMode == VK_PRESENT_MODE_MAILBOX_KHR &&
+      physProp.vendorID == 0x10de /* NVIDIA PCI device ID */) {
+    logW("WARNING: PRESENT_MODE_MAILBOX chosen, %s\n",
+         "NVidia fullscreen has bad tearing!");
+  }
+#endif
+  return 0;
 }
 
 Device::Device(VkSurfaceKHR surface) {

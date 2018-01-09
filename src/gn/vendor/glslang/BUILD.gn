@@ -39,7 +39,6 @@ config("glslang_config") {
 config("glslang_local_config") {
   if (!is_win) {
     cflags = [
-      "-Wno-strict-overflow",
       "-Wno-unused-function",
       "-Wno-unused-parameter",
       "-Wno-unused-variable",
@@ -47,6 +46,7 @@ config("glslang_local_config") {
       "-Wno-ignored-qualifiers",
       "-Wno-sign-compare",
       "-Wno-reorder",
+      "-Wno-format-nonliteral",
     ]
 
     if (is_clang) {
@@ -65,7 +65,7 @@ config("glslang_local_config") {
 }
 
 config("glslang_maybe_uninitialized") {
-  if (!is_win) {
+  if (!is_win && !is_mac) {
     cflags = [ "-Wno-maybe-uninitialized" ]
   }
 }
@@ -78,6 +78,7 @@ source_set("OGLCompiler") {
 
   all_dependent_configs = [ ":glslang_config" ]
   configs += [ ":glslang_local_config" ]
+  configs -= [ "//src/gn/config:strict-overflow" ]
 }
 
 source_set("HLSL") {
@@ -93,6 +94,7 @@ source_set("HLSL") {
 
   all_dependent_configs = [ ":glslang_config" ]
   configs += [ ":glslang_local_config" ]
+  configs -= [ "//src/gn/config:strict-overflow" ]
 }
 
 static_library("glslang-default-resource-limits") {
@@ -107,6 +109,7 @@ static_library("glslang-default-resource-limits") {
 static_library("glslang") {
   sources = [
     glslang + "glslang/MachineIndependent/glslang_tab.cpp",
+    glslang + "glslang/MachineIndependent/attribute.cpp",
     glslang + "glslang/MachineIndependent/Constant.cpp",
     glslang + "glslang/MachineIndependent/iomapper.cpp",
     glslang + "glslang/MachineIndependent/InfoSink.cpp",
@@ -149,6 +152,7 @@ static_library("glslang") {
 
   all_dependent_configs = [ ":glslang_config" ]
   configs += [ ":glslang_local_config" ]
+  configs -= [ "//src/gn/config:strict-overflow" ]
   deps = [ ":OGLCompiler" ]
   if (use_hlsl) {
     deps += [ ":HLSL" ]
@@ -169,6 +173,7 @@ static_library("SPIRV") {
 
   all_dependent_configs = [ ":glslang_config" ]
   configs += [ ":glslang_local_config" ]
+  configs -= [ "//src/gn/config:strict-overflow" ]
   deps = [ ":glslang" ]
 }
 
@@ -190,6 +195,7 @@ executable("glslangValidator") {
     ":glslang_maybe_uninitialized",
     ":glslang_config",
   ]
+  configs -= [ "//src/gn/config:strict-overflow" ]
 }
 
 if (is_spirv_remap_enabled) {

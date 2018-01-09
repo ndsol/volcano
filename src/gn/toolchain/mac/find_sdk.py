@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Copyright (c) 2017 the Volcano Authors. All rights reserved.
 # Licensed under the GPLv3.
@@ -21,7 +21,7 @@ from optparse import OptionParser
 
 def parse_version(version_str):
   """'10.6' => [10, 6]"""
-  return map(int, re.findall(r'(\d+)', version_str))
+  return [int(s) for s in re.findall(r'(\d+)', version_str)]
 
 
 def main():
@@ -47,10 +47,11 @@ def main():
   job = subprocess.Popen(['xcode-select', '-print-path'],
                          stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT)
-  out, err = job.communicate()
+  out, err_unused = job.communicate()
+  if out is not None:
+    out = out.decode(sys.stdout.encoding)
   if job.returncode != 0:
-    print >> sys.stderr, out
-    print >> sys.stderr, err
+    print(out, file=sys.stderr)
     raise Exception('Error %d running xcode-select' % job.returncode)
   sdk_dir = os.path.join(
       out.rstrip(), 'Platforms/MacOSX.platform/Developer/SDKs')
@@ -63,22 +64,24 @@ def main():
   best_sdk = sorted(sdks, key=parse_version)[0]
 
   if options.verify and best_sdk != min_sdk_version and not options.sdk_path:
-    print >> sys.stderr, ''
-    print >> sys.stderr, '                                           vvvvvvv'
-    print >> sys.stderr, ''
-    print >> sys.stderr, \
+    print('', file=sys.stderr)
+    print('                                           vvvvvv', file=sys.stderr)
+    print('', file=sys.stderr)
+    print(\
         'This build requires the %s SDK, but it was not found on your system.' \
-        % min_sdk_version
-    print >> sys.stderr, \
-        'Either install it, or explicitly set mac_sdk in your GYP_DEFINES.'
-    print >> sys.stderr, ''
-    print >> sys.stderr, '                                           ^^^^^^^'
-    print >> sys.stderr, ''
+        % min_sdk_version, file=sys.stderr)
+    print(\
+        'Either install it, or explicitly set mac_sdk in your GYP_DEFINES.',
+        file=sys.stderr)
+    print('', file=sys.stderr)
+    print('                                           ^^^^^^', file=sys.stderr)
+    print('', file=sys.stderr)
     sys.exit(1)
 
   if options.print_sdk_path:
-    print subprocess.check_output(
-        ['xcrun', '-sdk', 'macosx' + best_sdk, '--show-sdk-path']).strip()
+    xcrun = subprocess.check_output(
+        ['xcrun', '-sdk', 'macosx' + best_sdk, '--show-sdk-path'])
+    print(xcrun.decode(sys.stdout.encoding).strip())
 
   return best_sdk
 
@@ -86,5 +89,5 @@ def main():
 if __name__ == '__main__':
   if sys.platform != 'darwin':
     raise Exception("This script only runs on Mac")
-  print main()
+  print(main())
   sys.exit(0)

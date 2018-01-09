@@ -30,4 +30,33 @@ declare_args() {
   # Enable Link Time Optimization in optimized builds (output programs run
   # faster, but linking is up to 5-20x slower).
   enable_lto = is_official_build && is_win && !is_clang
+
+  # Optional array containing extra assembler arguments.
+  # Like 'asmflags' this value is passed to all tools that take
+  # an .asm or .S input.
+  extra_asmflags = []
+
+  # Optional array containing extra compiler arguments.
+  # Like 'cflags' this value is passed to the C, C++, Objective C, and
+  # Objective C++ compilers.
+  extra_cflags = []
+
+  # Optional array containing extra compiler arguments.
+  # Like 'cflags_c' this value is only passed to the C compiler.
+  extra_cflags_c = []
+
+  # Optional array containing extra compiler arguments.
+  # Like 'cflags_cc' this value is only passed to the C++ compiler.
+  extra_cflags_cc = []
+
+  # Optional array containing extra compiler arguments.
+  # Like 'cflags_objc' this value is only passed to the Objective C compiler.
+  extra_cflags_objc = []
+
+  # Optional array containing extra compiler arguments.
+  # Like 'cflags_objcc' this value is only passed to the Objective C++ compiler.
+  extra_cflags_objcc = []
+
+  # Optional array containing extra linker arguments.
+  extra_ldflags = []
 }

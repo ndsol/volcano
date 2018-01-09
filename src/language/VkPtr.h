@@ -59,12 +59,24 @@
 #define VK_NULL_HANDLE nullptr
 #endif /*VOLCANO_TYPEDEF_STRUCT*/
 
-void logV(const char *fmt, ...);  // Verbose log.
-void logD(const char *fmt, ...);  // Debug log.
-void logI(const char *fmt, ...);  // Info log.
-void logW(const char *fmt, ...);  // Warn log.
-void logE(const char *fmt, ...);  // Error log.
-void logF(const char *fmt, ...);  // Fatal log.
+#ifdef _MSC_VER
+#define VOLCANO_PRINTF(y, z)
+#else
+#define VOLCANO_PRINTF(y, z) __attribute__((format(printf, y, z)))
+#endif
+
+void logV(const char *fmt, ...)  // Verbose log.
+    VOLCANO_PRINTF(1, 2);
+void logD(const char *fmt, ...)  // Debug log.
+    VOLCANO_PRINTF(1, 2);
+void logI(const char *fmt, ...)  // Info log.
+    VOLCANO_PRINTF(1, 2);
+void logW(const char *fmt, ...)  // Warn log.
+    VOLCANO_PRINTF(1, 2);
+void logE(const char *fmt, ...)  // Error log.
+    VOLCANO_PRINTF(1, 2);
+void logF(const char *fmt, ...)  // Fatal log.
+    VOLCANO_PRINTF(1, 2);
 
 #define VKDEBUG(...)
 #ifndef VKDEBUG
@@ -272,4 +284,9 @@ class VkPtr {
 
 #ifdef VKDEBUG
 #undef VKDEBUG
+#endif
+
+#ifdef _WIN32
+#include <stdlib.h>
+typedef unsigned int uint;
 #endif

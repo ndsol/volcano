@@ -31,25 +31,27 @@ find_sdk_args += [ mac_sdk_min ]
 
 # The tool will print the SDK path on the first line, and the version on the
 # second line.
-find_sdk_lines = exec_script("//src/gn/toolchain/mac/find_sdk.py",
-                             find_sdk_args,
-                             "list lines")
-mac_sdk_version = find_sdk_lines[1]
-if (mac_sdk_path == "") {
-  mac_sdk_path = find_sdk_lines[0]
-}
+if (is_mac || is_ios || is_tvos) {
+  find_sdk_lines = exec_script("//src/gn/toolchain/mac/find_sdk.py",
+                              find_sdk_args,
+                              "list lines")
+  mac_sdk_version = find_sdk_lines[1]
+  if (mac_sdk_path == "") {
+    mac_sdk_path = find_sdk_lines[0]
+  }
 
-script_name = "//src/gn/toolchain/mac/sdk_info.py"
-sdk_info_args = []
-if (!use_system_xcode) {
-  sdk_info_args += [
-    "--developer_dir",
-    hermetic_xcode_path,
-  ]
-}
-sdk_info_args += [ mac_sdk_name ]
+  script_name = "//src/gn/toolchain/mac/sdk_info.py"
+  sdk_info_args = []
+  if (!use_system_xcode) {
+    sdk_info_args += [
+      "--developer_dir",
+      hermetic_xcode_path,
+    ]
+  }
+  sdk_info_args += [ mac_sdk_name ]
 
-_mac_sdk_result = exec_script(script_name, sdk_info_args, "scope")
-xcode_version = _mac_sdk_result.xcode_version
-xcode_build = _mac_sdk_result.xcode_build
-machine_os_build = _mac_sdk_result.machine_os_build
+  _mac_sdk_result = exec_script(script_name, sdk_info_args, "scope")
+  xcode_version = _mac_sdk_result.xcode_version
+  xcode_build = _mac_sdk_result.xcode_build
+  machine_os_build = _mac_sdk_result.machine_os_build
+}

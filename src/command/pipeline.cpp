@@ -78,6 +78,16 @@ int Pipeline::init(RenderPass& renderPass, size_t subpass_i) {
         subpass_i, renderPass.pipelines.size());
     return 1;
   }
+  if (info.asci.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN) {
+    // TODO: validate components swizzle in src/languag/imageview.cpp. But this
+    // all belongs in a portability assistance layer, not in Volcano.
+    logW("TRIANGLE_FAN is not supported by MoltenVK or DX12 portability.\n");
+    logW("See https://www.knrhonos.org/vulkan-portability-initiative\n");
+#ifdef __APPLE__ /* neither iOS nor macOS via MoltenVK can do TRIANGLE_FAN */
+    logE("This apple device does not support TRIANGLE_FAN (MoltenVK).\n");
+    return 1;
+#endif
+  }
 
   //
   // Collect PipelineCreateInfo structures into native Vulkan structures.
@@ -146,7 +156,5 @@ int Pipeline::init(RenderPass& renderPass, size_t subpass_i) {
   }
   return 0;
 }
-
-Pipeline::~Pipeline() {}
 
 }  // namespace command

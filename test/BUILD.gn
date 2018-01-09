@@ -16,6 +16,7 @@ executable("basic_test") {
   sources = [
     "basic_test.cpp",
   ]
+  configs += [ "//src/gn/config:optimize_debug" ]
 
   deps = [
     ":shaders",

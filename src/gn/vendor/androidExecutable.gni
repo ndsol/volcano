@@ -65,6 +65,9 @@ if (android_variants_dir != "" && current_toolchain != host_toolchain) {
       }
       # Copy resources file using host_toolchain, below.
       deps = [ ":host_$target_name($host_toolchain)" ]
+      if (defined(invoker.deps)) {
+        deps += invoker.deps
+      }
     }
   }
 } else if (android_variants_dir != "" && current_os != "android") {
@@ -90,10 +93,16 @@ if (android_variants_dir != "" && current_toolchain != host_toolchain) {
   template("androidResource") {
     copy("host_$target_name") {
       forward_variables_from(invoker, "*")
-      outputs = [
-        root_build_dir +
-        "/{{source_root_relative_dir}}-droid/raw_asset/{{source_target_relative}}",
-      ]
+      p = "$root_build_dir/{{source_root_relative_dir}}-droid/raw_asset/"
+      o = []
+      foreach(s, sources) {
+        if (get_path_info(s, "dir") == target_gen_dir) {
+          o += [ p + get_path_info(s, "file") ]
+        } else {
+          o += [ p + s ]
+        }
+      }
+      outputs = o
     }
   }
 } else {
@@ -116,7 +125,15 @@ if (android_variants_dir != "" && current_toolchain != host_toolchain) {
   template("androidResource") {
     copy(target_name) {
       forward_variables_from(invoker, "*")
-      outputs = [ "$root_build_dir/res/{{source_target_relative}}" ]
+      o = []
+      foreach(s, sources) {
+        if (get_path_info(s, "dir") == target_gen_dir) {
+          o += [ "$root_build_dir/res/" + get_path_info(s, "file") ]
+        } else {
+          o += [ "$root_build_dir/res/" + s ]
+        }
+      }
+      outputs = o
     }
   }
 }

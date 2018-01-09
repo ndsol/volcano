@@ -2,8 +2,27 @@
 # Licensed under the GPL v3.
 import("skiaTarget.gni")
 
+config("skia_public_config") {
+  include_dirs = [
+    volcano_prefix + "vendor/skia/include/android",
+    volcano_prefix + "vendor/skia/include/c",
+    volcano_prefix + "vendor/skia/include/codec",
+    volcano_prefix + "vendor/skia/include/config",
+    volcano_prefix + "vendor/skia/include/core",
+    volcano_prefix + "vendor/skia/include/effects",
+    volcano_prefix + "vendor/skia/include/encode",
+    volcano_prefix + "vendor/skia/include/gpu",
+    volcano_prefix + "vendor/skia/include/gpu/gl",
+    volcano_prefix + "vendor/skia/include/pathops",
+    volcano_prefix + "vendor/skia/include/ports",
+    volcano_prefix + "vendor/skia/include/svg",
+    volcano_prefix + "vendor/skia/include/utils",
+    volcano_prefix + "vendor/skia/include/utils/mac",
+  ]
+}
+
 source_set("skia") {
-  public_configs = [ "../vulkansamples:skia_public_config" ]
+  public_configs = [ ":skia_public_config" ]
   sources = [ "skiaglue.cpp" ]
   deps = [
     ":gli",
@@ -12,6 +31,7 @@ source_set("skia") {
     volcano_prefix + ":science",
     "../vulkansamples:vk_format_utils",
   ]
+  configs -= [ "//src/gn/config:strict-overflow" ]
   libs = [ libskia_path ]
   if (is_win) {
     libs += [
@@ -21,8 +41,10 @@ source_set("skia") {
     libs += [
       "fontconfig",
       "freetype",
-      "GL",
     ]
+    if (!is_mac) {
+      libs += [ "GL" ]
+    }
   }
 }
 
@@ -32,8 +54,17 @@ config("gli_config") {
     cflags = [
       "-Wno-strict-aliasing",
       "-Wno-ignored-qualifiers",
-      "-Wno-unused-but-set-variable",
     ]
+  }
+  if (is_mac) {
+    cflags += [
+      "-Wno-sign-compare",
+      "-Wno-unused-parameter",
+      "-Wno-unused-variable",
+    ]
+  }
+  if (is_posix && !is_mac) {
+    cflags += [ "-Wno-unused-but-set-variable" ]
   }
 }
 

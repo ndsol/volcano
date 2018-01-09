@@ -35,7 +35,7 @@ uint32_t calculateMinRequestedImages(const VkSurfaceCapabilitiesKHR& scap) {
   return imageCount;
 }
 
-VkExtent2D calculateSurfaceExtend2D(const VkSurfaceCapabilitiesKHR& scap,
+VkExtent2D calculateSurfaceExtent2D(const VkSurfaceCapabilitiesKHR& scap,
                                     VkExtent2D sizeRequest) {
   // If currentExtent != { UINT32_MAX, UINT32_MAX } then Vulkan is telling us:
   // "this is the right extent: you already created a surface and Vulkan
@@ -47,6 +47,10 @@ VkExtent2D calculateSurfaceExtend2D(const VkSurfaceCapabilitiesKHR& scap,
   // Vulkan is telling us "choose width, height from scap.minImageExtent
   // to scap.maxImageExtent." Attempt to satisfy sizeRequest.
   const VkExtent2D &lo = scap.minImageExtent, hi = scap.maxImageExtent;
+  if (hi.width == 0 || hi.height == 0 || hi.width < lo.width ||
+      hi.height < lo.height) {
+    logF("calculateSurfaceExtent2D: window is minimized, will fail.\n");
+  }
   return {
       /*width:*/ std::max(lo.width, std::min(hi.width, sizeRequest.width)),
       /*height:*/
@@ -56,9 +60,7 @@ VkExtent2D calculateSurfaceExtend2D(const VkSurfaceCapabilitiesKHR& scap,
 
 VkSurfaceTransformFlagBitsKHR calculateSurfaceTransform(
     const VkSurfaceCapabilitiesKHR& scap) {
-  // TODO: Is there any platform that needs to override scap.currentTransform?
-  // if (scap.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
-  //   return VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+  // Most platforms can just use the currentTransform value for preTransform.
   return scap.currentTransform;
 }
 
@@ -74,7 +76,7 @@ int Device::resetSwapChain(command::CommandPool& cpool, size_t poolQindex) {
   }
 
   swapChainInfo.imageExtent =
-      calculateSurfaceExtend2D(scap, swapChainInfo.imageExtent);
+      calculateSurfaceExtent2D(scap, swapChainInfo.imageExtent);
   swapChainInfo.preTransform = calculateSurfaceTransform(scap);
   swapChainInfo.minImageCount = calculateMinRequestedImages(scap);
 

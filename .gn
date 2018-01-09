@@ -3,4 +3,5 @@
 buildconfig = "//src/gn/BUILDCONFIG.gn"
 default_args = {
   volcano_prefix = "//"
+  mac_deployment_target = "10.11"
 }

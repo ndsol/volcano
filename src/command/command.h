@@ -14,7 +14,7 @@
  *    * PipelineStage
  *    * Shader
  *
- * 2. The Semaphore (with PresentSemaphore), Fence, and Event classes.
+ * 2. The Semaphore, Fence, and Event classes.
  *
  * 3. The CommandPool and CommandBuilder classes.
  */
@@ -328,30 +328,6 @@ typedef struct Semaphore {
   VkPtr<VkSemaphore> vk;
 } Semaphore;
 
-// PresentSemaphore is a special Semaphore that adds the present() method.
-class PresentSemaphore : public Semaphore {
- public:
-  language::Device& dev;
-  VkQueue q;
-
- public:
-  PresentSemaphore(language::Device& dev) : Semaphore(dev), dev(dev) {}
-  PresentSemaphore(PresentSemaphore&&) = default;
-  PresentSemaphore(const PresentSemaphore&) = delete;
-
-  // Two-stage constructor: call ctorError() to build PresentSemaphore.
-  WARN_UNUSED_RESULT int ctorError();
-
-  // present() submits the given swapChain image_i to Device dev's screen
-  // using the correct language::PRESENT queue and synchronization.
-  WARN_UNUSED_RESULT int present(uint32_t image_i);
-
-  // waitIdle must be used to prevent validation layers from leaking memory,
-  // and will slightly reduce the overall application's performance. Removing
-  // waitIdle may or may not be worth the trouble.
-  WARN_UNUSED_RESULT int waitIdle();
-};
-
 // Fence represents a GPU-to-CPU synchronization. Fences are the only sync
 // primitive which the CPU can wait on.
 typedef struct Fence {
@@ -415,7 +391,12 @@ class CommandPool {
           VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 
   // q is an accessor to return a VkQueue from the queueFamily.
-  VkQueue q(size_t i) { return qf_->queues.at(i); }
+  VkQueue q(size_t i) {
+    if (!qf_) {
+      logF("CommandPool::q called before CommandPool::ctorError\n");
+    }
+    return qf_->queues.at(i);
+  }
 
   // free releases any VkCommandBuffer in buf. Command Buffers are automatically
   // freed when the CommandPool is destroyed, so free() is really only needed

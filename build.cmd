@@ -114,11 +114,11 @@ rmdir /s /q vendor\glfw\deps\vulkan 2> nul
 python src/gn/winpatch.py
 
 echo gn gen out/Debug
-gn gen out/Debug --args="visual_studio_version = ""2017"""
+gn gen out/Debug
 if errorlevel 1 goto :subcmd_failed
 
 echo gn gen out/DebugDLL
-gn gen out/DebugDLL --args="use_dynamic_crt = true visual_studio_version = ""2017"""
+gn gen out/DebugDLL --args="use_dynamic_crt = true"
 if errorlevel 1 goto :subcmd_failed
 
 cd %startup_dir%

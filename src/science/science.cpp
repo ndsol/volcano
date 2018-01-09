@@ -4,8 +4,6 @@
 
 namespace science {
 
-CommandPoolContainer::~CommandPoolContainer(){};
-
 void ImageCopies::addSrc(memory::Image& src) {
   for (uint32_t mipLevel = 0; mipLevel < src.info.mipLevels; mipLevel++) {
     addSrcAtMipLevel(src, mipLevel);
@@ -51,15 +49,24 @@ SmartCommandBuffer::~SmartCommandBuffer() {
   }
 }
 
-int PipeBuilder::alphaBlendWithPreviousPass() {
-  // Tell pipeline to alpha blend with what is already in framebuffer.
+int PipeBuilder::alphaBlendWithPreviousPass(
+    const command::PipelineCreateInfo& prevPipeInfo) {
   auto& pipeInfo = info();
+  if (pipeInfo.attach.size() > prevPipeInfo.attach.size()) {
+    logE("alphaBlendWithPreviousPass: %zu attachments when prevPipe has %zu\n",
+         pipeInfo.attach.size(), prevPipeInfo.attach.size());
+    return 1;
+  }
+
+  // Tell pipeline to alpha blend with what is already in framebuffer.
   pipeInfo.perFramebufColorBlend.at(0) =
       command::PipelineCreateInfo::withEnabledAlpha();
 
   // Update the loadOp to load data from the framebuffer, instead of a CLEAR_OP.
-  for (auto& attach : pipeInfo.attach) {
+  for (size_t i = 0; i < pipeInfo.attach.size(); i++) {
+    auto& attach = pipeInfo.attach.at(i);
     attach.vk.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    attach.vk.initialLayout = prevPipeInfo.attach.at(i).vk.finalLayout;
   }
 
   // Autodetect if the device is using a depth buffer.

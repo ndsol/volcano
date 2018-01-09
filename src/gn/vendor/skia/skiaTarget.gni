@@ -1,14 +1,16 @@
 # Copyright (c) 2017 the Volcano Authors. Licensed under GPLv3.
+import("//src/gn/config/compiler.gni")
 import("//src/gn/toolchain/android/settings.gni")
 import("//src/gn/vendor/subgnDefines.gni")
+if (is_mac) {
+  import("//src/gn/toolchain/mac/mac_sdk.gni")
+}
 
 if (is_win) {
   import("//src/gn/toolchain/win/settings.gni")
 
   libskia = "skia.lib"
-  libskia_os_args = " msvc = " + visual_studio_version +
-    " windk = \"" + visual_studio_path + "\"" +
-    " vchostdir = \"" + "VC/Tools/MSVC/14.11.25503" + "\"" +
+  libskia_os_args = " win_vc = \"" + visual_studio_path + "/VC\"" +
     " use_dynamic_crt = "
   if (use_dynamic_crt) {
     libskia_os_args += "true"
@@ -31,6 +33,28 @@ skia_args = "skia_enable_tools = false " +
   "ndk_api = $android_ndk_major_version" +
   libskia_os_args +
   libskia_extra_args
+
+s=""
+p=""
+foreach(i, extra_cflags_c) {
+  s=s + p + " \"" + i + "\""
+  p=","
+}
+if (s != "") {
+  skia_args = skia_args + " extra_cflags_c=[" + s + " ]"
+}
+s=""
+p=""
+foreach(i, extra_cflags_cc) {
+  s=s + p + " \"" + i + "\""
+  p=","
+}
+if (s != "") {
+  skia_args = skia_args + " extra_cflags_cc=[" + s + " ]"
+}
+if (is_mac) {
+  skia_args = skia_args + " mac_deployment_target=\"$mac_deployment_target\""
+}
 
 if (android_variants_dir != "" && current_os != "android") {
   # Do not generate output twice. When android_variants_dir is set, builds for

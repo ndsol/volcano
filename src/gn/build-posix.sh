@@ -144,10 +144,20 @@ if [ -n "$clist" ]; then
     echo "  $clist"
     ;;
   brew|port)
-    echo "Please install the following commands before continuing:"
-    echo "  $clist"
-    echo "WARNING: iOS and macOS are known to not even compile!"
-    echo "WARNING: https://github.com/ndsol/volcano/issues/2"
+    P="$PKG_CONFIG_PATH"
+    if [ -n "$P" ]; then
+      P="$P:"
+    fi
+    # use two dirname calls to remove "/bin"
+    B=$(dirname $(dirname $(which $installer)))
+    export PKG_CONFIG_PATH="$P$B/opt/icu4c/lib/pkgconfig"
+    if ! pkg-config --exists icu-i18n; then
+      echo "Please $installer install icu4c"
+      exit 1
+    fi
+    CFLAGS="$CFLAGS $(pkg-config --cflags icu-i18n)"
+    CXXFLAGS="$CXXFLAGS $(pkg-config --cflags icu-i18n)"
+    LDFLAGS="$LDFLAGS $(pkg-config --libs-only-L icu-i18n) -L$B/lib"
     ;;
   *)
     pkglist=""
@@ -166,9 +176,9 @@ if [ -n "$clist" ]; then
       echo "Please emerge$pkglist"
       ;;
     esac
+    exit 1
     ;;
   esac
-  exit 1
 fi
 
 # Travis CI omits realpath from apt-get install coreutils.
@@ -206,30 +216,32 @@ if [ $RV -ne 0 ]; then
     echo "  add submod \"update-index\" $b @ $a"
     git update-index --add --cacheinfo 160000 "$a" "$b"
   done <<EOF
-30489c5aa1392f698e904c6aced1d7a486634c40 vendor/glfw
+0d4534733b7a748a21a1b1177bb37a9b224e3582 vendor/glfw
 93c0c449dab34039800d00dd7e36aba98fa59b49 vendor/gli
-715c353a15836e5ae192a64a4cf54e2ce7e8d66a vendor/glslang
-f4772dd00459f05bd37ed94a0c7ecc736dc26a02 vendor/skia
-a02b008ce01758b5e511c0816d7e3757b4d8cb7d vendor/spirv_cross
-408f17e000938e0add7b49aedafa7ce96eca235b vendor/subgn
-f7fc86aacd948109c56fd606f98273fdf9771377 vendor/vulkansamples
+fd920b3b6a9ccc9a327a014f9d73ef4da0812e57 vendor/glslang
+06ef95c004ba8b6b38e152e8816d5c069772a601 vendor/skia
+cae17224a075573572dfaf54192002cb413b5558 vendor/spirv_cross
+18d8101003c1ff691bfb58af47faf1e82e58083c vendor/subgn
+5b2d09510cb3e6c98cdac695188e331f5446163c vendor/vulkansamples
 EOF
   git commit -q -m "repo was downloaded without .git, build.cmd rebuilt it"
 fi
 
 SUBMODULE_CMD="git submodule update --init --recursive"
+SUBT=$(mktemp -t volcano-build.XXXXXXXXXX)
 set +e
-$SUBMODULE_CMD --depth=51
+( $SUBMODULE_CMD --depth=51 2>&1 && rm $SUBT ) | tee $SUBT
 RV=$?
 set -e
+if [ -f $SUBT ]; then
+  RV=1
+fi
 while [ $RV -ne 0 ]; do
   echo ""
   echo "WARN: $SUBMODULE_CMD --depth=51 # failed, deepening..."
-  set +e
-  D=$($SUBMODULE_CMD 2>&1 | sed -e \
-'/^\(Fetched in submodule\|Unable to checkout\)/'\
-'s/.*in submodule path '"'"'\(.*\)'"'"'.*/\1/p;d')
-  set -e
+  D=$(cat $SUBT | sed -e \
+'s/Unable to checkout.*in submodule path '"'"'\(.*\)'"'"'.*/\1/p;'\
+'s/Fetched in submodule path '"'"'\(.*\)'"'"'.*/\1/p;d')
 
   while read d; do
     if [ -z "$d" ]; then
@@ -241,19 +253,33 @@ while [ $RV -ne 0 ]; do
       git fetch --unshallow
     )
   done <<<"$D"
-  set +e
-  $SUBMODULE_CMD
-  RV=$?
-  set -e
-  if [ $RV -eq 0 ]; then
-    # Work around a git submodule bug: if the initial submodule update fails,
-    # some submodules may not be checked out, only fetched.
-    #
-    # This should be a no-op for any successfully checked out submodule, only
-    # forcing all submodules into a "detached HEAD" state.
-    git submodule foreach --recursive git checkout HEAD@{0}
+  if [ -n "$D" ]; then
+    set +e
+    ( $SUBMODULE_CMD 2>&1 && rm $SUBT ) | tee $SUBT
+    RV=$?
+    set -e
+    if [ -f $SUBT ]; then
+      RV=1
+    fi
+    if [ $RV -eq 0 ]; then
+      # Work around a git submodule bug: if the initial submodule update fails,
+      # some submodules may not be checked out, only fetched.
+      #
+      # This should be a no-op for any successfully checked out submodule, only
+      # forcing all submodules into a "detached HEAD" state.
+      git submodule foreach --recursive git checkout HEAD@{0}
+    fi
+    # Work around yet another git submodule bug: after all the above,
+    # $SUBMODULE_CMD may need to run again.
+    $SUBMODULE_CMD
+  else
+    echo "Bug: unable to read submodule problem from git output."
+    rm -f $SUBT
+    exit 1
   fi
 done
+rm -f $SUBT
+SUBT=
 
 # has glfw been patched?
 if [ ! -d vendor/glfw/deps ]; then
@@ -269,33 +295,213 @@ if ! grep '__android_log_assert' vendor/spirv_cross/spirv_common.hpp >/dev/null 
   missing="$missing patch-spirv-cross"
 fi
 
+LVL=vendor/vulkansamples/submodules/Vulkan-LoaderAndValidationLayers
 # has vulkansamples been patched?
 if ! grep '#include <vulkan/vulkan.h>' \
-    vendor/vulkansamples/layers/vk_format_utils.cpp >/dev/null 2>&1; then
+    $LVL/layers/vk_format_utils.cpp >/dev/null 2>&1; then
   missing="$missing patch-vulkansamples"
 fi
 
-# just patch gli
-sed -i -e \
+if ! grep -q 'HeaderDesc\.format\.flags = Storage\.layers() > 1 ? [^ ][^ ]* : '\
+'detail::DDPF(Desc\.Flags)' vendor/gli/gli/core/save_dds.inl; then
+  missing="$missing patch-gli"
+fi
+
+missing="$missing git-sync-deps install-gn-ninja"
+echo "volcano updating:$missing"
+
+for buildstep in $missing; do
+  case $buildstep in
+  patch-glfw)
+    # patch glfw to remove its version of vulkan.h
+    rm -r vendor/glfw/deps/vulkan
+    # Fix DWM_BB_ENABLE bug.
+    patch --no-backup-if-mismatch -p1 <<EOF
+--- a/vendor/glfw/src/win32_platform.h
++++ b/vendor/glfw/src/win32_platform.h
+@@ -110,7 +110,7 @@ typedef struct tagCHANGEFILTERSTRUCT
+ #endif
+ #endif /*Windows 7*/
+ 
+-#if WINVER < 0x0600
++#ifndef DWM_BB_ENABLE
+ #define DWM_BB_ENABLE 0x00000001
+ #define DWM_BB_BLURREGION 0x00000002
+ typedef struct
+--- a/vendor/glfw/src/cocoa_platform.h
++++ b/vendor/glfw/src/cocoa_platform.h
+@@ -46,7 +46,7 @@ typedef struct VkMacOSSurfaceCreateInfoMVK
+     const void*                     pView;
+ } VkMacOSSurfaceCreateInfoMVK;
+ 
+-typedef VkResult (APIENTRY *PFN_vkCreateMacOSSurfaceMVK)(VkInstance,const VkMacOSSurfaceCreateInfoMVK*,const VkAllocationCallbacks*,VkSurfaceKHR*);
++VkResult APIENTRY vkCreateMacOSSurfaceMVK(VkInstance,const VkMacOSSurfaceCreateInfoMVK*,const VkAllocationCallbacks*,VkSurfaceKHR*);
+ 
+ #include "posix_thread.h"
+ #include "cocoa_joystick.h"
+--- a/vendor/glfw/src/cocoa_window.m
++++ b/vendor/glfw/src/cocoa_window.m
+@@ -1838,16 +1838,6 @@ VkResult _glfwPlatformCreateWindowSurface(VkInstance instance,
+ #if MAC_OS_X_VERSION_MAX_ALLOWED >= 101100
+     VkResult err;
+     VkMacOSSurfaceCreateInfoMVK sci;
+-    PFN_vkCreateMacOSSurfaceMVK vkCreateMacOSSurfaceMVK;
+-
+-    vkCreateMacOSSurfaceMVK = (PFN_vkCreateMacOSSurfaceMVK)
+-        vkGetInstanceProcAddr(instance, "vkCreateMacOSSurfaceMVK");
+-    if (!vkCreateMacOSSurfaceMVK)
+-    {
+-        _glfwInputError(GLFW_API_UNAVAILABLE,
+-                        "Cocoa: Vulkan instance missing VK_MVK_macos_surface extension");
+-        return VK_ERROR_EXTENSION_NOT_PRESENT;
+-    }
+ 
+     // HACK: Dynamically load Core Animation to avoid adding an extra
+     //       dependency for the majority who don't use MoltenVK
+EOF
+    ;;
+
+  patch-spirv-cross)
+    patch --no-backup-if-mismatch -p1 <<EOF
+--- a/vendor/spirv_cross/spirv_common.hpp
++++ b/vendor/spirv_cross/spirv_common.hpp
+@@ -32,6 +32,9 @@
+ #include <unordered_set>
+ #include <utility>
+ #include <vector>
++#ifdef __ANDROID__
++#include <android/log.h>
++#endif
+ 
+ namespace spirv_cross
+ {
+@@ -43,6 +46,9 @@ namespace spirv_cross
+     inline void
+     report_and_abort(const std::string &msg)
+ {
++#ifdef __ANDROID__
++	__android_log_assert(__FILE__, "volcano", "spirv_cross error: %s\n", msg.c_str());
++#else
+ #ifdef NDEBUG
+ 	(void)msg;
+ #else
+@@ -50,6 +56,7 @@ namespace spirv_cross
+ #endif
+ 	fflush(stderr);
+ 	abort();
++#endif
+ }
+ 
+ #define SPIRV_CROSS_THROW(x) report_and_abort(x)
+@@ -116,7 +123,9 @@ inline std::string merge(const std::vector<std::string> &list)
+ template <typename T>
+ inline std::string convert_to_string(T &&t)
+ {
+-	return std::to_string(std::forward<T>(t));
++	std::ostringstream converter;
++	converter << std::forward<T>(t);
++	return converter.str();
+ }
+ 
+ // Allow implementations to set a convenient standard precision
+EOF
+    ;;
+
+  patch-vulkansamples)
+    for a in \
+      core_validation \
+      object_tracker_utils \
+      threading \
+      unique_objects
+    do
+      sed -i -e 's'\
+'/pVersionStruct->pfn\(Get\(Instance\|Device\|PhysicalDevice\)ProcAddr\)'\
+' = vk\(\(GetInstance\|GetDevice\|_layerGetPhysicalDevice\)ProcAddr\);$'\
+'/pVersionStruct->pfn\1 = '"${a%_utils}"'::\1;/' \
+        $LVL/layers/"${a}".cpp
+      # macOS sed leaves files behind
+      rm -f $LVL/layers/"${a}".cpp-e
+    done
+    sed -i -e 's/static \(const char \* GetPhysDevFeatureString\)/inline \1/' \
+        $LVL/scripts/helper_file_generator.py
+    # macOS sed leaves files behind
+    rm -f $LVL/scripts/helper_file_generator.py-e
+    sed -i -e 's/\(self.gen.logMsg(.warn., .Attempt to redef\)/if False: \1/' \
+        $LVL/scripts/reg.py
+    # macOS sed leaves files behind
+    rm -f $LVL/scripts/reg.py-e
+    sed -i -e 's/\(print("gen[A-Za-z]* {} {}".format(\)/pass #\1/' \
+        $LVL/scripts/parameter_validation_generator.py
+    # macOS sed leaves files behind
+    rm -f $LVL/scripts/parameter_validation_generator.py-e
+    awk '{
+        sub("^#include \"vulkan/vulkan.h\"","#include <vulkan/vulkan.h>");
+        if ($0 ~ /^VK_LAYER_EXPORT uint32_t FormatPlaneCount/) {f=1}
+        else if (f && !d && $0 ~ /case.*VK_FORMAT_.*PLANE_/) {
+            print "#ifdef VK_KHR_sampler_ycbcr_conversion"
+            d=1
+        } else if (f && d && $0 ~ /default:$/) {
+            print "#endif"
+        } else if (f && $0 ~ /^}/) {
+            f=0
+            d=0
+        }
+        print
+      }' $LVL/layers/vk_format_utils.cpp > $LVL/layers/vkfutil.cpptmp
+    mv $LVL/layers/{vkfutil.cpptmp,vk_format_utils.cpp}
+    ;;
+
+  git-sync-deps)
+    (
+      touch git-sync-deps-pid
+      (
+        $lscolor vendor/skia/tools/git-sync-deps
+        cd vendor/skia
+        $python tools/git-sync-deps
+      )
+      rm -f git-sync-deps-pid
+    ) &
+    export GIT_SYNC_DEPS_PID=$!
+    ;;
+
+  install-gn-ninja)
+    # build gn and ninja from source for aarch64 (chromium omits aarch64), and
+    # subgn and subninja have some additional features used in volcano.
+    (
+      cd vendor/subgn
+      if [ ! -x gn ]; then
+        ./build.cmd
+        cp subninja/ninja out_bootstrap/gn .
+      fi
+    )
+    if ! grep -q "vendor/subgn" <<<"$PATH"; then
+      export PATH="$PATH:$( cd -P -- "$PWD/vendor/subgn" && echo "$PWD" )"
+      SUBGN_WAS_ADDED=1
+    fi
+    if [ -n "$GIT_SYNC_DEPS_PID" ]; then
+      [ -f git-sync-deps-pid ] && echo "git-sync-deps..."
+      wait $GIT_SYNC_DEPS_PID
+    fi
+    ;;
+
+  patch-gli)
+    sed -i -e \
 's,\(HeaderDesc\.format\.flags = Storage\.layers() > 1 ? [^ ][^ ]* : \)\(Desc\.Flags\),'\
 '\1detail::DDPF(\2),;'\
 's,\(HeaderDesc\.format\.fourCC = Storage\.layers() > 1 ? [^ ][^ ]* : \)\(Desc\.FourCC\),'\
 '\1detail::D3DFORMAT(\2),' vendor/gli/gli/core/save_dds.inl
+    # macOS sed leaves files behind
+    rm -f vendor/gli/gli/core/save_dds.inl-e
+    ;;
+  *)
+    echo "ERROR: unknown buildstep \"$buildstep\""
+    exit 1
+  esac
+done
 
-# just patch glslang and imgui
+# just patch imgui
+# Note: this must be done after git-sync-deps
 patch --no-backup-if-mismatch -sN -r - -p1 <<EOF >/dev/null || true
---- a/vendor/glslang/glslang/MachineIndependent/Initialize.cpp
-+++ b/vendor/glslang/glslang/MachineIndependent/Initialize.cpp
-@@ -6341,8 +6341,8 @@ void TBuiltIns::identifyBuiltIns(int version, EProfile profile, const SpvVersion
- #ifdef AMD_EXTENSIONS
-         if (profile != EEsProfile)
-             symbolTable.relateToOperator("interpolateAtVertexAMD", EOpInterpolateAtVertex);
--        break;
- #endif
-+        break;
- 
-     case EShLangCompute:
-         symbolTable.relateToOperator("memoryBarrierShared",     EOpMemoryBarrierShared);
 --- a/vendor/skia/third_party/externals/imgui/imgui.cpp
 +++ b/vendor/skia/third_party/externals/imgui/imgui.cpp
 @@ -859,7 +859,7 @@ ImGuiIO::ImGuiIO()
@@ -397,136 +603,82 @@ patch --no-backup-if-mismatch -sN -r - -p1 <<EOF >/dev/null || true
     }
     return bottom_y;
 EOF
-
-missing="$missing git-sync-deps install-gn-ninja"
-echo "volcano updating:$missing"
-
-for buildstep in $missing; do
-  case $buildstep in
-  patch-glfw)
-    # patch glfw to remove its version of vulkan.h
-    rm -r vendor/glfw/deps/vulkan
-    # Fix DWM_BB_ENABLE bug.
-    patch --no-backup-if-mismatch -p1 <<EOF
---- a/vendor/glfw/src/win32_platform.h
-+++ b/vendor/glfw/src/win32_platform.h
-@@ -116,7 +116,7 @@ typedef struct tagCHANGEFILTERSTRUCT
- #endif
- #endif /*Windows 7*/
- 
--#if WINVER < 0x0600
-+#ifndef DWM_BB_ENABLE
- #define DWM_BB_ENABLE 0x00000001
- #define DWM_BB_BLURREGION 0x00000002
- typedef struct
-EOF
-    ;;
-
-  patch-spirv-cross)
-    patch --no-backup-if-mismatch -p1 <<EOF
---- a/vendor/spirv_cross/spirv_common.hpp
-+++ b/vendor/spirv_cross/spirv_common.hpp
-@@ -32,6 +32,9 @@
- #include <unordered_set>
- #include <utility>
- #include <vector>
-+#ifdef __ANDROID__
-+#include <android/log.h>
-+#endif
- 
- namespace spirv_cross
- {
-@@ -43,6 +46,9 @@ namespace spirv_cross
-     inline void
-     report_and_abort(const std::string &msg)
- {
-+#ifdef __ANDROID__
-+	__android_log_assert(__FILE__, "volcano", "spirv_cross error: %s\n", msg.c_str());
-+#else
- #ifdef NDEBUG
- 	(void)msg;
- #else
-@@ -50,6 +56,7 @@ namespace spirv_cross
- #endif
- 	fflush(stderr);
- 	abort();
-+#endif
- }
- 
- #define SPIRV_CROSS_THROW(x) report_and_abort(x)
-@@ -116,7 +123,9 @@ inline std::string merge(const std::vector<std::string> &list)
- template <typename T>
- inline std::string convert_to_string(T &&t)
- {
--	return std::to_string(std::forward<T>(t));
-+	std::ostringstream converter;
-+	converter << std::forward<T>(t);
-+	return converter.str();
- }
- 
- // Allow implementations to set a convenient standard precision
-EOF
-    ;;
-
-  patch-vulkansamples)
-    for a in \
-      core_validation \
-      object_tracker_utils \
-      threading \
-      unique_objects
-    do
-      sed -i -e 's'\
-'/pVersionStruct->pfn\(Get\(Instance\|Device\|PhysicalDevice\)ProcAddr\)'\
-' = vk\(\(GetInstance\|GetDevice\|_layerGetPhysicalDevice\)ProcAddr\);$'\
-'/pVersionStruct->pfn\1 = '"${a%_utils}"'::\1;/' \
-        vendor/vulkansamples/layers/"${a}".cpp
-    done
-    sed -i -e 's'\
-'/static const char \* GetPhysDevFeatureString'\
-'/inline const char * GetPhysDevFeatureString/' \
-        vendor/vulkansamples/scripts/helper_file_generator.py
-    sed -i -e 's,^#include "vulkan/vulkan.h",#include <vulkan/vulkan.h>,' \
-        vendor/vulkansamples/layers/vk_format_utils.cpp
-    ;;
-
-  git-sync-deps)
-    (
-      touch git-sync-deps-pid
-      (
-        $lscolor vendor/skia/tools/git-sync-deps
-        cd vendor/skia
-        $python tools/git-sync-deps
-      )
-      rm -f git-sync-deps-pid
-    ) &
-    export GIT_SYNC_DEPS_PID=$!
-    ;;
-
-  install-gn-ninja)
-    # build gn and ninja from source for aarch64 (chromium omits aarch64), and
-    # subgn and subninja have some additional features used in volcano.
-    (
-      cd vendor/subgn
-      if [ ! -x gn ]; then
-        ./build.cmd
-        cp subninja/ninja out_bootstrap/gn .
-      fi
-    )
-    if ! grep -q "vendor/subgn" <<<"$PATH"; then
-      export PATH="$PATH:$( cd -P -- "$PWD/vendor/subgn" && echo "$PWD" )"
-      SUBGN_WAS_ADDED=1
+if [ "$(uname)" == "Darwin" ]; then
+  # macOS 'patch' makes a mess of the "-r -" arg
+  rm -f -- -
+  # macOS: clone MoltenVK
+  (
+    cd $LVL
+    if [ ! -d MoltenVK ]; then
+      echo "git clone"
+      git clone https://github.com/KhronosGroup/MoltenVK
+      cd MoltenVK
+    else
+      cd MoltenVK
+      git pull 2>&1 | grep -v 'Could not resolve host: github\.com' || true
     fi
-    if [ -n "$GIT_SYNC_DEPS_PID" ]; then
-      [ -f git-sync-deps-pid ] && echo "git-sync-deps..."
-      wait $GIT_SYNC_DEPS_PID
-    fi
-    ;;
+    # Patch MoltenVK/icd/MoltenVK_icd.json
+    sed -i -e 's0\("library_path": "\)\./\(libMoltenVK.dylib",\)$0\1\20' \
+      MoltenVK/icd/MoltenVK_icd.json
+    # macOS sed leaves files behind
+    rm -f MoltenVK/icd/MoltenVK_icd.json-e
+  )
+fi
+# additional skia / sfntly patch
+SFNTLY_H=sfntly/cpp/src/sfntly/table/core/name_table.h
+SFNTLY_H="vendor/skia/third_party/externals/${SFNTLY_H}"
+awk '{
+    if (add_next==1){
+      s="#include <unicode/unistr.h>"
+      if ($0 != s) print s
+      add_next=0
+    }
+    if ($0 ~ "#include [<]unicode/ustring\\.h[>]"){add_next=1}
+    print
+  }' "${SFNTLY_H}" > sfntly.tmp
 
-  *)
-    echo "ERROR: unknown buildstep \"$buildstep\""
-    exit 1
-  esac
-done
+if ! cmp -s sfntly.tmp "${SFNTLY_H}"; then
+  mv sfntly.tmp "${SFNTLY_H}"
+else
+  rm sfntly.tmp
+fi
+
+args_to_gn() {
+  pre=" $1=["
+  shift
+  while [ $# -gt 0 ]; do
+    echo -n "$pre \"$1\""
+    pre=","
+    shift
+  done
+  if [ "$pre" == "," ]; then
+    echo " ]"
+  fi
+}
+
+# Pass $CC and $CXX to gn / ninja.
+args=""
+if [ -n "$CC" ]; then
+  args="$args gcc_cc=\"$CC\""
+fi
+if [ -n "$CXX" ]; then
+  args="$args gcc_cxx=\"$CXX\""
+fi
+# Pass $CFLAGS, $CXXFLAGS, $LDFLAGS to gn / ninja.
+if [ -n "$CFLAGS" ]; then
+  args="$args $(args_to_gn extra_cflags_c $CFLAGS)"
+fi
+if [ -n "$CXXFLAGS" ]; then
+  args="$args $(args_to_gn extra_cflags_cc $CXXFLAGS)"
+fi
+if [ -n "$LDFLAGS" ]; then
+  args="$args $(args_to_gn extra_ldflags $LDFLAGS)"
+fi
+VGA=volcano-gn-args
+if [ -f /tmp/${VGA}-request.txt ]; then
+  echo "$args" > /tmp/${VGA}.txt
+  rm /tmp/${VGA}-request.txt
+fi
 
 # If you choose, you may set the environment variable VOLCANO_NO_OUT to prevent
 # gn and ninja running and producing a Volcano build. By design, gn only allows
@@ -537,14 +689,6 @@ done
 if [ -z "$VOLCANO_NO_OUT" ]; then
   TARGET=Debug
 
-  # Pass $CC and $CXX to gn / ninja.
-  args=""
-  if [ -n "$CC" ]; then
-    args="$args gcc_cc=\"$CC\""
-  fi
-  if [ -n "$CXX" ]; then
-    args="$args gcc_cxx=\"$CXX\""
-  fi
   if [ -n "$args" ]; then
     args="--args=$args"
     gn gen out/$TARGET "$args"

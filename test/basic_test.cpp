@@ -36,10 +36,6 @@ namespace test {
 // Use a utility class *outside* lib/language to:
 //   TODO: show how to do double buffering, triple buffering
 //   TODO: permit customization of the enabled instance layers.
-//   TODO: mipmapping
-//
-// TODO: show how to do GPU compute
-// TODO: passes, subpasses, secondary command buffers, and subpass dependencies
 
 const char* imgFilename = nullptr;
 
@@ -63,6 +59,9 @@ class SimplePipeline : public science::CommandPoolContainer {
   SimplePipeline(language::Instance& instance)
       : CommandPoolContainer{*instance.devs.at(0)} {
     startTime = std::chrono::high_resolution_clock::now();
+    // Register onResizeFramebuf in CommandPoolContainer.
+    resizeFramebufListeners.emplace_back(
+        std::make_pair(onResizeFramebuf, this));
   }
 
   std::vector<command::CommandBuffer> cmdBuffers;
@@ -78,6 +77,7 @@ class SimplePipeline : public science::CommandPoolContainer {
   }
 
   static void windowResized(GLFWwindow* window, int glfw_w, int glfw_h) {
+    glfwGetWindowSize(window, &glfw_w, &glfw_h);
     if (glfw_w == 0 || glfw_h == 0) {
       // Window was minimized or moved offscreen. Pretend nothing happened.
       return;
@@ -110,7 +110,7 @@ class SimplePipeline : public science::CommandPoolContainer {
     }
     time += timeDelta;
 
-    test::st_basic_test_vert::ubo ubo = {};
+    test::UniformBufferObject ubo = {};
     auto model = glm::rotate(glm::mat4(), time * glm::radians(90.0f),
                              glm::vec3(0.0f, 0.0f, 1.0f));
     memcpy(&ubo.model[0][0], &model[0][0], sizeof(ubo.model));
@@ -183,7 +183,7 @@ class SimplePipeline : public science::CommandPoolContainer {
       }
     }
 
-    if (uniform.ctorError(dev, sizeof(test::st_basic_test_vert::ubo))) {
+    if (uniform.ctorError(dev, sizeof(test::UniformBufferObject))) {
       return 1;
     }
 
@@ -237,12 +237,18 @@ class SimplePipeline : public science::CommandPoolContainer {
   }
 
   // onResizeFramebuf is called for each framebuf that needs to be resized.
-  virtual int onResizeFramebuf(VkExtent2D newSize, language::Framebuf& framebuf,
-                               size_t framebuf_i) {
+  static int onResizeFramebuf(void* self, language::Framebuf& framebuf,
+                              size_t framebuf_i, size_t /*poolQindex*/) {
+    return static_cast<SimplePipeline*>(self)->onResizeFramebufImpl(framebuf,
+                                                                    framebuf_i);
+  }
+
+  int onResizeFramebufImpl(language::Framebuf& framebuf, size_t framebuf_i) {
     if (framebuf_i == 0) {
       cpool.updateBuffersAndPass(cmdBuffers, pass);
     }
     // Patch viewport with new size.
+    auto& newSize = cpool.dev.swapChainInfo.imageExtent;
     VkViewport& viewport = pipe0.info().viewports.at(0);
     viewport.width = (float)newSize.width;
     viewport.height = (float)newSize.height;
@@ -282,7 +288,7 @@ int mainLoop(GLFWwindow* window, SimplePipeline& simple) {
   if (imageAvailableSemaphore.ctorError(simple.cpool.dev)) {
     return 1;
   }
-  command::PresentSemaphore renderSemaphore(simple.cpool.dev);
+  science::PresentSemaphore renderSemaphore(simple);
   if (renderSemaphore.ctorError()) {
     return 1;
   }
@@ -294,26 +300,20 @@ int mainLoop(GLFWwindow* window, SimplePipeline& simple) {
     }
 
     uint32_t next_image_i;
-    VkResult v = vkAcquireNextImageKHR(
-        simple.cpool.dev.dev, simple.cpool.dev.swapChain,
-        std::numeric_limits<uint64_t>::max(), imageAvailableSemaphore.vk,
-        VK_NULL_HANDLE, &next_image_i);
-    if (v != VK_SUCCESS && v != VK_SUBOPTIMAL_KHR) {
-      if (v == VK_ERROR_OUT_OF_DATE_KHR) {
-        logW("vkAcquireNextImageKHR: OUT_OF_DATE\n");
-        auto& extent = simple.cpool.dev.swapChainInfo.imageExtent;
-        SimplePipeline::windowResized(window, extent.width, extent.height);
-        continue;
-      }
-      logE("vkAcquireNextImageKHR returned error\n");
+    if (simple.acquireNextImage(&next_image_i, imageAvailableSemaphore)) {
       return 1;
     }
-    if (simple.cmdBuffers.at(next_image_i)
-            .submit(0, {imageAvailableSemaphore.vk},
-                    {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
-                    {renderSemaphore.vk}) ||
-        renderSemaphore.present(next_image_i) || renderSemaphore.waitIdle()) {
-      return 1;
+    if (next_image_i != (uint32_t)-1) {
+      if (simple.cmdBuffers.at(next_image_i)
+              .submit(0, {imageAvailableSemaphore.vk},
+                      {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
+                      {renderSemaphore.vk}) ||
+          renderSemaphore.present(&next_image_i)) {
+        return 1;
+      }
+      if (next_image_i != (uint32_t)-1 && renderSemaphore.waitIdle()) {
+        return 1;
+      }
     }
   }
 

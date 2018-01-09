@@ -7,23 +7,7 @@ declare_args() {
 
 config("language_config") {
   if (!is_win) {
-    cflags = [
-      "-Wall",
-      "-Wextra",
-      "-Wformat=2",
-      "-fstrict-aliasing",
-      "-Wstrict-aliasing",
-      "-fstrict-overflow",
-      "-Wstrict-overflow=5",
-      "-frtti",
-      "-Wno-missing-field-initializers",
-    ]
-  }
-  if (is_linux) {
-    cflags += [
-      "-Og",
-      "-ggdb",
-    ]
+    cflags = [ "-Wno-missing-field-initializers" ]
   }
 }
 
@@ -66,6 +50,8 @@ static_library("command") {
     "src/command/pipeline.cpp",
     "src/command/pipeline_create.cpp",
     "src/command/render.cpp",
+    "src/command/shader.cpp",
+    "src/command/subpass.cpp",
   ]
 
   deps = [ ":language" ]
@@ -80,7 +66,9 @@ static_library("command") {
 source_set("memory") {
   sources = [
     "src/memory/add_depth.cpp",
+    "src/memory/buffer.cpp",
     "src/memory/descriptor.cpp",
+    "src/memory/image.cpp",
     "src/memory/memory.cpp",
     "src/memory/layout.cpp",
     "src/memory/sampler.cpp",
@@ -106,7 +94,10 @@ config("science_config") {
 }
 
 source_set("science") {
-  sources = [ "src/science/science.cpp" ]
+  sources = [
+    "src/science/present.cpp",
+    "src/science/science.cpp",
+  ]
   deps = [
     ":command",
     ":language",

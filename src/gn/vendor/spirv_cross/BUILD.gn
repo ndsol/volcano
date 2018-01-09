@@ -37,6 +37,12 @@ source_set("compilerGLSL") {
   configs += [ ":spirv_cross_config" ]
 }
 
+source_set("compilerMSL") {
+  sources = [ spirv_cross + "spirv_msl.cpp" ]
+  deps = [ ":compilerGLSL" ]
+  public_configs = [ ":spirv_cross_config" ]
+}
+
 group("spirv_cross") {
   deps = [
     ":compilerGLSL",

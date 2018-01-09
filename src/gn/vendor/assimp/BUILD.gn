@@ -20,6 +20,9 @@ template("assimp_source_set") {
     if (defined(configs_add)) {
       configs += configs_add
     }
+    if (defined(configs_del)) {
+      configs -= configs_del
+    }
     configs -= [ "//src/gn/config:no_exceptions" ]
     if (!defined(deps)) {
       deps = []
@@ -110,7 +113,9 @@ config("assimp_config") {
 }
 
 config("assimp_local_config") {
-  cflags = [ "-Wno-ignored-qualifiers" ]
+  if (!is_win) {
+    cflags = [ "-Wno-ignored-qualifiers" ]
+  }
   include_dirs = [ "$assimp_root" ]
 }
 
@@ -120,7 +125,7 @@ config("assimp_local_config") {
 
 assimp_source_set("IrrXML") {
   sources = [ "$assimp_root/contrib/irrXML/irrXML.cpp" ]
-  configs_add = [ "config:no_strict_overflow" ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
 }
 
 config("openddl_config") {
@@ -170,8 +175,8 @@ source_set("open3dgc") {
     ":assimp_local_config",
     ":open3dgc_config",
     "config:no_strict_aliasing",
-    "config:no_strict_overflow",
   ]
+  configs -= [ "//src/gn/config:strict-overflow" ]
 }
 
 source_set("poly2tri") {
@@ -187,7 +192,9 @@ source_set("poly2tri") {
 
 config("unzip_config") {
   include_dirs = [ "$assimp_root/contrib/unzip" ]
-  cflags = [ "-Wno-unused-parameter" ]
+  if (!is_win) {
+    cflags = [ "-Wno-unused-parameter" ]
+  }
 }
 
 source_set("unzip") {
@@ -208,7 +215,7 @@ source_set("unzip") {
 
 assimp_source_set("clipper") {
   sources = [ "$assimp_root/contrib/clipper/clipper.cpp" ]
-  configs_add = [ "config:no_strict_overflow" ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
 }
 
 assimp_source_set("assimp_target_animation") {
@@ -371,7 +378,7 @@ assimp_source_set("importer_irr") {
     "$assimp_root/code/IRRMeshLoader.cpp",
     "$assimp_root/code/IRRShared.cpp",
   ]
-  configs_add = [ "config:no_strict_overflow" ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
   deps = [
     ":assimp_standard_shapes",
     ":IrrXML",
@@ -428,7 +435,7 @@ assimp_source_set("importer_mdl") {
 
 assimp_source_set("importer_nff") {
   sources = [ "$assimp_root/code/NFFLoader.cpp" ]
-  configs_add = [ "config:no_strict_overflow" ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
   deps = [
     ":assimp_remove_comments",
     ":assimp_standard_shapes",
@@ -441,7 +448,7 @@ assimp_source_set("importer_ndo") {
 
 assimp_source_set("importer_off") {
   sources = [ "$assimp_root/code/OFFLoader.cpp" ]
-  configs_add = [ "config:no_strict_overflow" ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
 }
 
 assimp_source_set("importer_obj") {
@@ -587,7 +594,7 @@ assimp_source_set("importer_q3bsp") {
 
 assimp_source_set("importer_raw") {
   sources = [ "$assimp_root/code/RawLoader.cpp" ]
-  configs_add = [ "config:no_strict_overflow" ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
 }
 
 assimp_source_set("importer_sib") {
@@ -646,10 +653,10 @@ assimp_source_set("importer_x3d") {
   ]
   configs_add = [
     "config:no_unused_parameter",
-    "config:no_strict_overflow",
     "config:no_strict_aliasing",
     "config:no_maybe_uninitialized"
   ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
   deps = [
     ":assimp_standard_shapes",
     ":IrrXML",
@@ -1004,10 +1011,8 @@ assimp_source_set("assimp_core_with_warnings_suppressed") {
     "$assimp_root/code/SpatialSort.cpp",
     "$assimp_root/code/ProcessHelper.cpp",
   ]
-  configs_add = [
-    "config:no_strict_overflow",
-    "config:no_unused_parameter",
-  ]
+  configs_add = [ "config:no_unused_parameter" ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
 }
 
 assimp_target("assimp") {

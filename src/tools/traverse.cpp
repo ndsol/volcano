@@ -13,6 +13,12 @@
 #include <stdarg.h>
 #include <array>
 
+#ifdef _MSC_VER
+#define VOLCANO_PRINTF(y, z)
+#else
+#define VOLCANO_PRINTF(y, z) __attribute__((format(printf, y, z)))
+#endif
+
 extern const char* binaryFileName;
 extern const char* entryPointName;
 extern const char* sourceEntryPointName;
@@ -29,12 +35,13 @@ using namespace glslang;
 
 class TypeToCpp {
 public:
-    TypeToCpp(const TType& type, const TString& fieldName,
-              TString autoPrefix = "", int indent = 1)
+    TypeToCpp(const TType& type, const TString& fieldName, TString autoPrefix,
+              int indent, bool showUniforms)
         : indent(indent)
         , type(type)
         , fieldName(fieldName)
-        , autoPrefix(autoPrefix) {}
+        , autoPrefix(autoPrefix)
+        , showUniforms(showUniforms) {}
     ~TypeToCpp() {}
 
     TString toCpp();
@@ -47,11 +54,13 @@ protected:
     const TType& type;
     TString fieldName;
     TString autoPrefix;
+    bool showUniforms;
 };
 
 enum HeaderTraverseMode {
-    ModeCpp,
-    ModeAttributes,
+    ModeCpp,  // Output fields a c++, skipping uniforms.
+    ModeAttributes,  // Output VkVertexInputAttributeDescription.
+    ModeUniforms,  // Output uniform fields as c++.
 };
 
 class HeaderOutputTraverser : public TIntermTraverser {
@@ -78,16 +87,19 @@ public:
                     " * THIS FILE IS AUTO-GENERATED. ANY EDITS WILL BE DISCARDED.\n"
                     " * Source file: " << sourceFile << "\n"
                     " * See glslangValidator.{gni,py} which run "
-                    "src/tools:copyHeader. \n */\n"
+                    "src/tools:copyHeader.\n */\n"
                     "typedef struct st_" << structName << " {\n";
                 break;
             case ModeAttributes:
-                out.debug << "\n    static std::vector<"
+                out.debug << "\n#ifdef __cplusplus"
+                    "\n    static std::vector<"
                                     "VkVertexInputAttributeDescription"
                                     "> getAttributes() {\n"
                     "        std::vector<VkVertexInputAttributeDescription> "
                                     "attributes;\n"
                     "        VkVertexInputAttributeDescription* attr;\n";
+                break;
+            case ModeUniforms:
                 break;
             }
             foundLinkerObjects = true;
@@ -110,14 +122,20 @@ public:
         switch (mode) {
         case ModeCpp:
         {
-            TypeToCpp converter(t->getType(), node->getName());
+            TypeToCpp converter(t->getType(), node->getName(), "", 1, false);
             out.debug << converter.toCpp();
             break;
         }
         case ModeAttributes:
         {
-            TypeToCpp converter(t->getType(), node->getName(), "", 2);
+            TypeToCpp converter(t->getType(), node->getName(), "", 2, false);
             out.debug << converter.toVertexInputAttributes(structName);
+            break;
+        }
+        case ModeUniforms:
+        {
+            TypeToCpp converter(t->getType(), node->getName(), "", 0, true);
+            out.debug << converter.toCpp();
             break;
         }
         }
@@ -185,8 +203,15 @@ protected:
             if (it.foundLinkerObjects) {
                 it.out.debug << "        return attributes;\n"
                                 "    }\n"
+                                "#endif /* __cplusplus */\n"
                                 "} st_" << p << ";\n";
             }
+            fprintf(headerf, "%s", it.out.debug.c_str());
+        }
+        {
+            HeaderOutputTraverser it(unitFileName, ModeUniforms);
+            it.structName = p;
+            intermediate->getTreeRoot()->traverse(&it);
             fprintf(headerf, "%s", it.out.debug.c_str());
         }
         return false;  // false indicates success.
@@ -257,37 +282,41 @@ public:
     TString toString();
 };
 
+static void outIfToTString(TString* result, bool test, const char* fmt, ...)
+        VOLCANO_PRINTF(3, 4);
+static void outIfToTString(TString* result, bool test, const char* fmt, ...) {
+    if (!test) {
+        return;
+    }
+    int size = 0;
+    va_list ap;
+    va_start(ap, fmt);
+    size = vsnprintf(NULL, size, fmt, ap);
+    va_end(ap);
+    if (size < 0) {
+        result->append("vsnprintf(size) failed for \"");
+        result->append(fmt);
+        result->append("\"");
+        return;
+    }
+    size++;
+    char* buf = new char[size];
+    va_start(ap, fmt);
+    if (vsnprintf(buf, size, fmt, ap) < 0) {
+        result->append("vsnprintf failed for \"");
+        result->append(fmt);
+        result->append("\"");
+        delete[] buf;
+        return;
+    }
+    va_end(ap);
+    result->append(buf);
+    delete[] buf;
+};
+#define outIf(...) outIfToTString(&result, __VA_ARGS__)
+
 TString QualifierToCpp::toString() {
     TString result;
-    const auto outIf = [&](bool test, const char* fmt, ...)  {
-        if (!test) {
-            return;
-        }
-        int size = 0;
-        va_list ap;
-        va_start(ap, fmt);
-        size = vsnprintf(NULL, size, fmt, ap);
-        va_end(ap);
-        if (size < 0) {
-            result.append("vsnprintf(size) failed for \"");
-            result.append(fmt);
-            result.append("\"");
-            return;
-        }
-        size++;
-        char* buf = new char[size];
-        va_start(ap, fmt);
-        if (vsnprintf(buf, size, fmt, ap) < 0) {
-            result.append("vsnprintf failed for \"");
-            result.append(fmt);
-            result.append("\"");
-            delete[] buf;
-            return;
-        }
-        va_end(ap);
-        result.append(buf);
-        delete[] buf;
-    };
 
     if (hasLayout()) {
         // To reduce noise, skip "layout(" if the only layout is an
@@ -352,64 +381,68 @@ TString QualifierToCpp::toString() {
 TString TypeToCpp::toCpp()
 {
     TString result;
+    bool isConst = false;
+    // Only "const"/"uniform"/"buffer"/"shared" when showUniforms == true.
+    // Only in/out/builtin type data when showUniforms == false.
+    // "global" is always shown (it is typically inside another block).
+    switch (type.getQualifier().storage) {
+    case EvqGlobal: break;
+    case EvqConst:
+    case EvqConstReadOnly:
+        isConst = true; /* Falls through. */
+    case EvqUniform:
+    case EvqBuffer:
+    case EvqShared:
+        if (!showUniforms) {
+            return result;
+        }
+        break;
+    default:
+        if (showUniforms) {
+            return result;
+        }
+    }
     for (int i = 0; i < indent; i++) result.append("    ");
     result.append(autoPrefix);
 
     QualifierToCpp qualifier(type.getQualifier());
 
-    const auto outIf = [&](bool test, const char* fmt, ...)  {
-        if (!test) {
-            return;
-        }
-        int size = 0;
-        va_list ap;
-        va_start(ap, fmt);
-        size = vsnprintf(NULL, size, fmt, ap);
-        va_end(ap);
-        if (size < 0) {
-            result.append("vsnprintf(size) failed for \"");
-            result.append(fmt);
-            result.append("\"");
-            return;
-        }
-        size++;
-        char* buf = new char[size];
-        va_start(ap, fmt);
-        if (vsnprintf(buf, size, fmt, ap) < 0) {
-            result.append("vsnprintf failed for \"");
-            result.append(fmt);
-            result.append("\"");
-            delete[] buf;
-            return;
-        }
-        va_end(ap);
-        result.append(buf);
-        delete[] buf;
-    };
-
-    // Filter out all symbols that are predefined.
-    bool predefined = false;
-    if (qualifier.storage == EvqVaryingOut || qualifier.storage == EvqOut ||
-        qualifier.builtIn != EbvNone || type.getBasicType() == EbtVoid)
-    {
-        predefined = true;
-        if (autoPrefix.find("//") != 0) {
-            result.append("//");
+    if (isConst) {
+        // The const symbols are predefined but need a special case.
+        if (qualifier.isFrontEndConstant()) {
+            result.append("//const ");
+            // TODO: if TIntermSymbol* node got passed in, see how
+            // TParseContext::handleBracketDereference() calls getIConst() to
+            // extract the defined value of the constant.
+        } else {
+            outIf(true, "//[constant_id = %d] specialization-const ",
+                  qualifier.layoutSpecConstantId);
         }
     } else {
-        result.append("/*");
-    }
-    result.append(qualifier.toString());
-    if (!predefined) {
-        result.append("*/\n");
-        for (int i = 0; i < indent; i++) result.append("    ");
-    } else {
-        result.append(" ");
+        // Filter out all symbols that are predefined.
+        bool predefined = false;
+        if (qualifier.storage == EvqVaryingOut || qualifier.storage == EvqOut ||
+            qualifier.builtIn != EbvNone || type.getBasicType() == EbtVoid)
+        {
+            predefined = true;
+            if (autoPrefix.find("//") != 0) {
+                result.append("//");
+            }
+        } else {
+            result.append("/*");
+        }
+        result.append(qualifier.toString());
+        if (!predefined) {
+            result.append("*/\n");
+            for (int i = 0; i < indent; i++) result.append("    ");
+        } else {
+            result.append(" ");
+        }
     }
 
     // If fieldName begins with "anon@", attempt to unpack without creating
     // a struct.
-    bool fieldIsAnon = fieldName.find("anon@") == 0;
+    bool fieldIsAnon = IsAnonymous(fieldName);
     if (!fieldIsAnon) {
         switch (type.getBasicType()) {
         case EbtSampler:
@@ -418,17 +451,19 @@ TString TypeToCpp::toCpp()
         case EbtVoid:        result.append("void"); break;
         case EbtFloat:       result.append("float"); break;
         case EbtDouble:      result.append("double"); break;
-#ifdef AMD_EXTENSIONS
         case EbtFloat16:     result.append("float16_t"); break;
-#endif
+        case EbtInt8:        result.append("int8_t"); break;
+        case EbtUint8:       result.append("uint8_t"); break;
+        case EbtInt16:       result.append("int16_t"); break;
+        case EbtUint16:      result.append("uint_t"); break;
         case EbtInt:         result.append("int"); break;
         case EbtUint:        result.append("uint"); break;
         case EbtInt64:       result.append("int64_t"); break;
         case EbtUint64:      result.append("uint64_t"); break;
         case EbtBool:        result.append("bool"); break;
         case EbtAtomicUint:  result.append("atomic_uint"); break;
-        case EbtStruct:      result.append("typedef struct"); break;
-        case EbtBlock:       result.append("typedef struct"); break;
+        case EbtStruct:      result.append("struct"); break;
+        case EbtBlock:       result.append("struct"); break;
         case EbtString:
             result.append("<HLSL string is invalid in this context>");
             break;
@@ -449,13 +484,13 @@ TString TypeToCpp::toCpp()
 
             while (childAutoPrefix[0] == ' ') childAutoPrefix.erase(0, 1);
         }
-        outIf(!fieldIsAnon, " %s {\n", fieldName.c_str());
+        outIf(!fieldIsAnon, " %s {\n", type.getTypeName().c_str());
         for (size_t i = 0; i < structure->size(); ++i) {
             int childIndent = indent;
             if (!fieldIsAnon) childIndent++;
             TypeToCpp converter(*(*structure)[i].type,
                                 (*structure)[i].type->getFieldName(),
-                                childAutoPrefix, childIndent);
+                                childAutoPrefix, childIndent, showUniforms);
             result.append(converter.toCpp());
         }
         if (!fieldIsAnon) {
@@ -466,21 +501,36 @@ TString TypeToCpp::toCpp()
 
     if (!fieldIsAnon) {
         //outIf(qualifier.builtIn != EbvNone, " /*builtIn:%s*/", type.getBuiltInVariableString());
-        outIf(true, " %s", fieldName.c_str());
+        if (showUniforms && type.isStruct() && indent == 0) {
+            // Suppress fieldName and any isMatrix()/isVector().
+        } else {
+            outIf(true, " %s", fieldName.c_str());
 
-        if (type.isArray()) {
-            auto* arraySizes = type.getArraySizes();
-            for(int i = 0; i < (int)arraySizes->getNumDims(); ++i) {
-                if (i == 0) result.append(" ");
-                int size = arraySizes->getDimSize(i);
-                result.append("[");
-                outIf(size != 0, "%d", size);
-                result.append("]");
+            if (type.isArray()) {
+                auto* arraySizes = type.getArraySizes();
+                for(int i = 0; i < (int)arraySizes->getNumDims(); ++i) {
+                    if (i == 0) result.append(" ");
+                    int size = arraySizes->getDimSize(i);
+                    result.append("[");
+                    outIf(size != 0, "%d", size);
+                    result.append("]");
+                }
+            }
+            outIf(type.isMatrix(), " [%d][%d]", type.getMatrixCols(), type.getMatrixRows());
+            outIf(type.isVector(), " [%d]", type.getVectorSize());
+        }
+        outIf(true, ";\n");
+        if (showUniforms) {
+            if (type.isMatrix() && type.getMatrixCols() == 3) {
+                result.append("#warning In UBO/SSBO/PushConstant, ");
+                result.append("Matrix of 3 cols is broken, please use 4: ");
+                result.append("https://stackoverflow.com/a/38172697/734069\n");
+            } else if (type.isVector() && type.getVectorSize() == 3) {
+                result.append("#warning In UBO/SSBO/PushConstant, ");
+                result.append("vec3 is broken, please use vec4: ");
+                result.append("https://stackoverflow.com/a/38172697/734069\n");
             }
         }
-        outIf(type.isMatrix(), " [%d][%d]", type.getMatrixCols(), type.getMatrixRows());
-        outIf(type.isVector(), " [%d]", type.getVectorSize());
-        outIf(true, ";\n");
     }
     return result;
 }
@@ -526,36 +576,6 @@ TString TypeToCpp::toVertexInputAttributes(TString& structName) {
     result.append(autoPrefix);
 
     QualifierToCpp qualifier(type.getQualifier());
-
-    const auto outIf = [&](bool test, const char* fmt, ...)  {
-        if (!test) {
-            return;
-        }
-        int size = 0;
-        va_list ap;
-        va_start(ap, fmt);
-        size = vsnprintf(NULL, size, fmt, ap);
-        va_end(ap);
-        if (size < 0) {
-            result.append("vsnprintf(size) failed for \"");
-            result.append(fmt);
-            result.append("\"");
-            return;
-        }
-        size++;
-        char* buf = new char[size];
-        va_start(ap, fmt);
-        if (vsnprintf(buf, size, fmt, ap) < 0) {
-            result.append("vsnprintf failed for \"");
-            result.append(fmt);
-            result.append("\"");
-            delete[] buf;
-            return;
-        }
-        va_end(ap);
-        result.append(buf);
-        delete[] buf;
-    };
 
     // Whitelist the storage qualifiers that will be included.
     switch (qualifier.storage) {
@@ -613,7 +633,7 @@ TString TypeToCpp::toVertexInputAttributes(TString& structName) {
             if (fieldIsAnon) {
                 TypeToCpp converter(*(*structure)[i].type,
                                     (*structure)[i].type->getFieldName(),
-                                    childAutoPrefix, childIndent);
+                                    childAutoPrefix, childIndent, showUniforms);
                 result.append(converter.toVertexInputAttributes(structName));
             }
         }
@@ -649,16 +669,18 @@ TString TypeToCpp::toVertexInputAttributes(TString& structName) {
         case EbtNumTypes:
             result.append("<NumTypes is invalid in this context>");
             return result;
+        case EbtFloat16:
         case EbtFloat:       makeFormat(attrFormat, 32, "SFLOAT"); break;
         case EbtDouble:      makeFormat(attrFormat, 64, "SFLOAT"); break;
-#ifdef AMD_EXTENSIONS
-        case EbtFloat16:     makeFormat(attrFormat, 16, "SFLOAT"); break;
-#endif
         case EbtInt:         makeFormat(attrFormat, 32, "INT"); break;
         case EbtUint:        makeFormat(attrFormat, 32, "UINT"); break;
         case EbtInt64:       makeFormat(attrFormat, 64, "INT"); break;
         case EbtUint64:      makeFormat(attrFormat, 64, "UINT"); break;
-        case EbtBool:        makeFormat(attrFormat, 8, "UINT"); break;
+        case EbtBool:
+        case EbtUint8:       makeFormat(attrFormat, 8, "UINT"); break;
+        case EbtInt8:        makeFormat(attrFormat, 8, "INT"); break;
+        case EbtInt16:       makeFormat(attrFormat, 16, "INT"); break;
+        case EbtUint16:      makeFormat(attrFormat, 16, "UINT"); break;
         case EbtAtomicUint:  makeFormat(attrFormat, 32, "UINT"); break;
         }
 

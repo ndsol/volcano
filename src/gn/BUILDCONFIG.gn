@@ -134,6 +134,7 @@ default_compiler_configs = [
   "//src/gn/config:runtime_library",
   "//src/gn/config:symbol_visibility_hidden",
   "//src/gn/config:wextra",
+  "//src/gn/config:strict-overflow",
 ]
 if (is_win) {
   default_compiler_configs += [

@@ -213,7 +213,7 @@ def DetectVisualStudioPath(version_as_year):
         if path[-1] == '\\':
           path = path[:-1]
         return path
-    raise Exception('Visual Studio %s path not found' % version_as_year)
+    return ""
   else:
     version = year_to_version[version_as_year]
     keys = [r'HKLM\Software\Microsoft\VisualStudio\%s' % version,
@@ -225,8 +225,7 @@ def DetectVisualStudioPath(version_as_year):
       path = os.path.normpath(os.path.join(path, '..', '..'))
       return path
 
-  raise Exception(('Visual Studio Version %s (from version_as_year)'
-                   ' not found.') % (version_as_year))
+  return ""
 
 
 def GetVsPath(version_as_year):

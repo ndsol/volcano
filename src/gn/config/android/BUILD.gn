@@ -130,6 +130,7 @@ config("runtime_library") {
                     root_build_dir),
     "--sysroot=" + rebase_path(sysroot, root_build_dir),
   ]
+  cflags_objcc = cflags_cc
 
   defines = [ "__GNU_SOURCE=1" ]  # Necessary for clone().
   ldflags = [ "-nostdlib" ]

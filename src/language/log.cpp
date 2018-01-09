@@ -83,6 +83,8 @@ static void logAny(char level, const char* fmt, va_list ap) {
 
 #else /* !defined(_WIN32) && !defined(__ANDROID__) */
 
+static void logAny(char level, const char* fmt, va_list ap)
+    __attribute__((format(printf, 2, 0)));
 static void logAny(char level, const char* fmt, va_list ap) {
   fprintf(stderr, "%c ", level);
   vfprintf(stderr, fmt, ap);

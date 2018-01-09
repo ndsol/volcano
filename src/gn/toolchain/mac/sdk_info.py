@@ -14,6 +14,10 @@ import sys
 # In the GYP build, this is done inside GYP itself based on the SDKROOT
 # variable.
 
+def CheckOutput(args):
+  return subprocess.check_output(args).decode(sys.stdout.encoding)
+
+
 def FormatVersion(version):
   """Converts Xcode version to a format required for Info.plist."""
   version = version.replace('.', '')
@@ -23,29 +27,29 @@ def FormatVersion(version):
 
 def FillXcodeVersion(settings):
   """Fills the Xcode version and build number into |settings|."""
-  lines = subprocess.check_output(['xcodebuild', '-version']).splitlines()
+  lines = CheckOutput(['xcodebuild', '-version']).splitlines()
   settings['xcode_version'] = FormatVersion(lines[0].split()[-1])
   settings['xcode_build'] = lines[-1].split()[-1]
 
 
 def FillMachineOSBuild(settings):
   """Fills OS build number into |settings|."""
-  settings['machine_os_build'] = subprocess.check_output(
+  settings['machine_os_build'] = CheckOutput(
       ['sw_vers', '-buildVersion']).strip()
 
 
 def FillSDKPathAndVersion(settings, platform, xcode_version):
   """Fills the SDK path and version for |platform| into |settings|."""
-  settings['sdk_path'] = subprocess.check_output([
+  settings['sdk_path'] = CheckOutput([
       'xcrun', '-sdk', platform, '--show-sdk-path']).strip()
-  settings['sdk_version'] = subprocess.check_output([
+  settings['sdk_version'] = CheckOutput([
       'xcrun', '-sdk', platform, '--show-sdk-version']).strip()
-  settings['sdk_platform_path'] = subprocess.check_output([
+  settings['sdk_platform_path'] = CheckOutput([
       'xcrun', '-sdk', platform, '--show-sdk-platform-path']).strip()
   # TODO: unconditionally use --show-sdk-build-version once Xcode 7.2 or
   # higher is required to build Chrome for iOS or OS X.
   if xcode_version >= '0720':
-    settings['sdk_build'] = subprocess.check_output([
+    settings['sdk_build'] = CheckOutput([
         'xcrun', '-sdk', platform, '--show-sdk-build-version']).strip()
   else:
     settings['sdk_build'] = settings['sdk_version']
@@ -70,4 +74,4 @@ if __name__ == '__main__':
   FillSDKPathAndVersion(settings, unknownargs[0], settings['xcode_version'])
 
   for key in sorted(settings):
-    print '%s="%s"' % (key, settings[key])
+    print('%s="%s"' % (key, settings[key]))

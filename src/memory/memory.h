@@ -18,6 +18,9 @@ namespace memory {
 // (There are many use cases where a non-zero queue index is so uncommon,
 // it is not supported. The use of this constant documents the assumption.)
 constexpr size_t ASSUME_POOL_QINDEX = 0;
+// ASSUME_PRESENT_QINDEX is used in science::PresentSemaphore to assume the
+// queue index is zero. The use of this constant documents the assumption.
+constexpr size_t ASSUME_PRESENT_QINDEX = 0;
 
 struct MemoryRequirements;
 
@@ -444,7 +447,19 @@ typedef struct UniformBuffer : public Buffer {
     return Buffer::copy(pool, stage);
   }
 
+  // copyAndKeepMmap automatically handles staging the host data in a Buffer
+  // 'stage', then copying to 'this'. The mmap() pointer is cached and reused
+  // when copyAndKeepMmap is called repeatedly.
+  // NOTE: If pool.dev is destroyed, the UniformBuffer will not know that the
+  // mmap is invalid!
+  WARN_UNUSED_RESULT int copyAndKeepMmap(command::CommandPool& pool,
+                                         const void* src, size_t len,
+                                         VkDeviceSize dstOffset = 0);
+
   Buffer stage;
+
+ protected:
+  void* stageMmap{nullptr};
 } UniformBuffer;
 
 // DescriptorPool represents memory reserved for a DescriptorSet (or many).

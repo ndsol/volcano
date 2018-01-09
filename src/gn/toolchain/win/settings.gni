@@ -27,16 +27,27 @@ declare_args() {
   use_dynamic_crt = false
 }
 
-assert(!is_win || visual_studio_version != "",
-       "You must set visual_studio_version on Windows")
-
 if (is_win && visual_studio_path == "") {
   visual_studio_path = exec_script("toolchain.py",
                                    [
                                      "get_vs_dir",
-                                     visual_studio_version,
+                                     "2015",
                                    ],
                                    "trim string")
+  if (visual_studio_path != "") {
+    visual_studio_version = "2015"
+  } else {
+    visual_studio_path = exec_script("toolchain.py",
+                                     [
+                                       "get_vs_dir",
+                                       "2017",
+                                     ],
+                                     "trim string")
+    if (visual_studio_path == "") {
+      assert(false, "get_vs_dir 2017 could not find visual studio")
+    }
+    visual_studio_version = "2017"
+  }
 }
 
 if (is_clang) {

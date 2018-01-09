@@ -51,6 +51,7 @@ config("compiler") {
   # modes.
   cflags_c = [ "/TC" ]
   cflags_cc = [ "/TP" ]
+  cflags_objcc = cflags_cc
 
   if (msc_full_ver >= 190000000 && !is_clang) {
     cflags += [
@@ -352,6 +353,7 @@ config("target_winrt") {
     "/ZW",
     "/EHsc",
   ]
+  cflags_objcc = cflags_cc
 }
 
 # Internal stuff --------------------------------------------------------------

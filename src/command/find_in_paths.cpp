@@ -77,7 +77,7 @@ static int initFindInPrefixes() {
   uint32_t size = 1024;
   do {
     selfPath.resize(size);
-  } while (!_NSGetExecutablePath(&selfPath[0], &size));
+  } while (_NSGetExecutablePath(&selfPath[0], &size));
 #elif defined(__sun) && defined(__SVR4) /* Solaris */
   const char* execName = getexecname();
   size_t size = strlen(execName) + 1;

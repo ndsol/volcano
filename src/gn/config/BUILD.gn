@@ -86,35 +86,6 @@ declare_args() {
   # Optimize for coverage guided fuzzing (balance between speed and number of
   # branches)
   optimize_for_fuzzing = false
-
-  # Optional string containing extra assembler arguments.
-  # Like 'asmflags' this value is passed to all tools that take
-  # an .asm or .S input.
-  extra_asmflags = ""
-
-  # Optional string containing extra compiler arguments.
-  # Like 'cflags' this value is passed to the C, C++, Objective C, and
-  # Objective C++ compilers.
-  extra_cflags = ""
-
-  # Optional string containing extra compiler arguments.
-  # Like 'cflags_c' this value is only passed to the C compiler.
-  extra_cflags_c = ""
-
-  # Optional string containing extra compiler arguments.
-  # Like 'cflags_cc' this value is only passed to the C++ compiler.
-  extra_cflags_cc = ""
-
-  # Optional string containing extra compiler arguments.
-  # Like 'cflags_objc' this value is only passed to the Objective C compiler.
-  extra_cflags_objc = ""
-
-  # Optional string containing extra compiler arguments.
-  # Like 'cflags_objcc' this value is only passed to the Objective C++ compiler.
-  extra_cflags_objcc = ""
-
-  # Optional string containing extra linker arguments.
-  extra_ldflags = ""
 }
 
 if (is_win && !is_clang) {
@@ -388,27 +359,13 @@ config("compiler") {
 }
 
 config("extra_flags") {
-  if (extra_asmflags != "") {
-    asmflags = [ extra_asmflags ]
-  }
-  if (extra_cflags != "") {
-    cflags = [ extra_cflags ]
-  }
-  if (extra_cflags_c != "") {
-    cflags_c = [ extra_cflags_c ]
-  }
-  if (extra_cflags_cc != "") {
-    cflags_cc = [ extra_cflags_cc ]
-  }
-  if (extra_cflags_objc != "") {
-    cflags_objc = [ extra_cflags_objc ]
-  }
-  if (extra_cflags_objcc != "") {
-    cflags_objcc = [ extra_cflags_objcc ]
-  }
-  if (extra_ldflags != "") {
-    ldflags = [ extra_ldflags ]
-  }
+  asmflags = extra_asmflags
+  cflags = extra_cflags
+  cflags_c = extra_cflags_c
+  cflags_cc = extra_cflags_cc
+  cflags_objc = extra_cflags_objc
+  cflags_objcc = extra_cflags_objcc
+  ldflags = extra_ldflags
 }
 
 # This is separate from :compiler (and not even a sub-config there)
@@ -725,6 +682,7 @@ config("runtime_library") {
 config("c++11") {
   if (!is_win) {
     cflags_cc = [ "-std=c++11" ]
+    cflags_objcc = cflags_cc
   }
 }
 
@@ -734,6 +692,7 @@ config("c++14") {
   } else if (is_clang || msc_full_ver >= 190024210) {
     cflags_cc = [ "/std:c++14" ]
   }
+  cflags_objcc = cflags_cc
 }
 
 config("c++latest") {
@@ -742,6 +701,7 @@ config("c++latest") {
   } else if (is_clang || msc_full_ver >= 190024210) {
     cflags_cc = [ "/std:c++latest" ]
   }
+  cflags_objcc = cflags_cc
 }
 
 # rtti ------------------------------------------------------------------------
@@ -754,6 +714,7 @@ config("rtti") {
   } else {
     cflags_cc = [ "-frtti" ]
   }
+  cflags_objcc = cflags_cc
 }
 
 config("no_rtti") {
@@ -763,8 +724,8 @@ config("no_rtti") {
       cflags_cc = [ "/GR-" ]
     } else {
       cflags_cc = [ "-fno-rtti" ]
-      cflags_objcc = cflags_cc
     }
+    cflags_objcc = cflags_cc
   }
 }
 
@@ -778,6 +739,7 @@ config("exceptions") {
   } else {
     cflags_cc = [ "-fexceptions" ]
   }
+  cflags_objcc = cflags_cc
 }
 
 config("no_exceptions") {
@@ -787,6 +749,7 @@ config("no_exceptions") {
       "/wd4530", # C4530: C++ exception handler used ...
       "/wd4577", # C4577: 'noexcept' ... exception termination not guaranteed
     ]
+    cflags_objcc = cflags_cc
   }
   if (!is_win || is_clang) {
     cflags_cc = [ "-fno-exceptions" ]
@@ -820,6 +783,16 @@ config("no_incompatible_pointer_warnings") {
   }
 }
 
+config("strict-overflow") {
+  cflags = []
+  if (!is_win && !is_clang) {
+    cflags += [
+      "-fstrict-overflow",
+      "-Wstrict-overflow=5",
+    ]
+  }
+}
+
 config("wextra") {
   cflags = []
   if (!is_win && !is_clang) {
@@ -829,8 +802,6 @@ config("wextra") {
       "-Wformat=2",
       "-fstrict-aliasing",
       "-Wstrict-aliasing",
-      "-fstrict-overflow",
-      "-Wstrict-overflow=5",
       "-Wno-deprecated",
     ]
   }
@@ -1255,14 +1226,7 @@ config("default_libs") {
     ]
   } else if (is_mac) {
     libs = [
-      "AppKit.framework",
-      "ApplicationServices.framework",
-      "Carbon.framework",
-      "CoreFoundation.framework",
       "Foundation.framework",
-      "IOKit.framework",
-      "OpenGL.framework",
-      "Security.framework",
     ]
   } else if (is_linux) {
     libs = [

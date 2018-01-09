@@ -5,10 +5,6 @@ config("no_unused_parameter") {
   cflags = [ "-Wno-unused-parameter" ]
 }
 
-config("no_strict_overflow") {
-  cflags = [ "-Wno-strict-overflow" ]
-}
-
 config("no_strict_aliasing") {
   cflags = [ "-fno-strict-aliasing" ]
 }

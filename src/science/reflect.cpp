@@ -170,7 +170,7 @@ struct ShaderLibraryInternal {
         // is being collected in binding.allStageBits above.
         binding.layouts.emplace_back(layoutBinding);
       } else if (bindingI > binding.layouts.size()) {
-        logE("ERROR: shader at stage %s: binding=%u skips binding=%u\n",
+        logE("ERROR: shader at stage %s: binding=%u skips binding=%zu\n",
              string_VkShaderStageFlagBits(stageBits), bindingI,
              binding.layouts.size());
         return 1;
@@ -256,7 +256,7 @@ shared_ptr<Shader> ShaderLibrary::load(const char* filename) {
   }
   MMapFile infile;
   if (infile.mmapRead(filename)) {
-    logE("%sload: mmapRead(%s) failed\n", "ShaderLibrary::");
+    logE("%sload: mmapRead(%s) failed\n", "ShaderLibrary::", filename);
     return shared_ptr<Shader>();
   }
   uint32_t* map = reinterpret_cast<uint32_t*>(infile.map);
