@@ -1,0 +1,36 @@
+# Copyright 2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+
+import("//src/gn/vendor/subgnDefines.gni")
+
+config("gli_config") {
+  include_dirs = [ volcano_prefix + "vendor/gli" ]
+  if (!is_win) {
+    cflags = [
+      "-Wno-strict-aliasing",
+      "-Wno-ignored-qualifiers",
+      "-Wno-type-limits",
+      "-Wno-unused-parameter",
+    ]
+  }
+  if (is_mac) {
+    cflags += [
+      "-Wno-sign-compare",
+      "-Wno-unused-parameter",
+      "-Wno-unused-variable",
+    ]
+  }
+  if (is_posix && !is_clang) {
+    cflags += [ "-Wno-unused-but-set-variable" ]
+  }
+}
+
+# gli is a header-only library, so all this does is make sure the right include
+# directories are added to the code that lists this as a dep.
+source_set("gli") {
+  public_configs = [
+    ":gli_config",
+    "../glm:glm_config",
+  ]
+  sources = []
+}

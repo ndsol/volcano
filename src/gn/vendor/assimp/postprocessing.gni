@@ -1,0 +1,128 @@
+# Copyright 2017 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+
+import("formats.gni")
+
+declare_args() {
+  use_assimp_exporter = false # Optional, use "gn args" to enable.
+
+  #
+  # Postprocessing
+  #
+
+  use_assimp_processing = false # Optional, use "gn args" to enable.
+
+  # Rarely-used postprocessing steps are controlled separately.
+  use_assimp_processing_all = false
+}
+
+declare_args() {
+  use_assimp_process_makelefthanded = (
+    use_assimp_processing && use_assimp_processing_all) || (
+    use_assimp_b3d || use_assimp_lwo_and_lws || use_assimp_3d ||
+    use_assimp_importer_x || use_assimp_mmd || use_assimp_exporter)
+  use_assimp_process_flipuvs = (
+    use_assimp_processing && use_assimp_processing_all) || (
+    use_assimp_mmd || use_assimp_exporter)
+  use_assimp_process_flipwindingorder = use_assimp_processing
+  use_assimp_process_removevc = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_remove_redundantmaterials = (
+    use_assimp_processing && use_assimp_processing_all)
+  use_assimp_process_findinstances = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_optimizegraph = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_finddegenerates = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_genuvcoords = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_transformtexcoords = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_pretransformvertices = use_assimp_processing
+  use_assimp_process_triangulate = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_sortbyptype = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_findinvaliddata = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_optimizemeshes = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_fixinfacingnormals = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_splitbybonecount = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_splitlargemeshes = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_genfacenormals = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_genvertexnormals = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_calctangents = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_joinvertices = (
+    use_assimp_processing && use_assimp_processing_all) || use_assimp_exporter
+  use_assimp_process_debone = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_limitboneweights = use_assimp_processing && use_assimp_processing_all
+  use_assimp_process_improvecachelocality = use_assimp_processing && use_assimp_processing_all
+}
+
+if (!use_assimp_process_makelefthanded) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_MAKELEFTHANDED_PROCESS" ]
+}
+if (!use_assimp_process_flipuvs) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_FLIPUVS_PROCESS" ]
+}
+if (!use_assimp_process_flipwindingorder) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_FLIPWINDINGORDER_PROCESS" ]
+}
+if (!use_assimp_process_removevc) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_REMOVEVC_PROCESS" ]
+}
+if (!use_assimp_process_remove_redundantmaterials) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_REMOVE_REDUNDANTMATERIALS_PROCESS" ]
+}
+if (!use_assimp_process_findinstances) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_FINDINSTANCES_PROCESS" ]
+}
+if (!use_assimp_process_optimizegraph) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_OPTIMIZEGRAPH_PROCESS" ]
+}
+if (!use_assimp_process_finddegenerates) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_FINDDEGENERATES_PROCESS" ]
+}
+if (!use_assimp_process_genuvcoords) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_GENUVCOORDS_PROCESS" ]
+}
+if (!use_assimp_process_transformtexcoords) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_TRANSFORMTEXCOORDS_PROCESS" ]
+}
+if (!use_assimp_process_pretransformvertices) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_PRETRANSFORMVERTICES_PROCESS" ]
+}
+if (!use_assimp_process_triangulate) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_TRIANGULATE_PROCESS" ]
+}
+if (!use_assimp_process_sortbyptype) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_SORTBYPTYPE_PROCESS" ]
+}
+if (!use_assimp_process_findinvaliddata) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_FINDINVALIDDATA_PROCESS" ]
+}
+if (!use_assimp_process_optimizemeshes) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_OPTIMIZEMESHES_PROCESS" ]
+}
+if (!use_assimp_process_fixinfacingnormals) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_FIXINFACINGNORMALS_PROCESS" ]
+}
+if (!use_assimp_process_splitbybonecount) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_SPLITBYBONECOUNT_PROCESS" ]
+}
+if (!use_assimp_process_splitlargemeshes) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_SPLITLARGEMESHES_PROCESS" ]
+}
+if (!use_assimp_process_genfacenormals) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_GENFACENORMALS_PROCESS" ]
+}
+if (!use_assimp_process_genvertexnormals) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_GENVERTEXNORMALS_PROCESS" ]
+}
+if (!use_assimp_process_calctangents) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_CALCTANGENTS_PROCESS" ]
+}
+if (!use_assimp_process_joinvertices) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_JOINVERTICES_PROCESS" ]
+}
+if (!use_assimp_process_debone) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_DEBONE_PROCESS" ]
+}
+if (!use_assimp_process_limitboneweights) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_LIMITBONEWEIGHTS_PROCESS" ]
+}
+if (!use_assimp_process_improvecachelocality) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_IMPROVECACHELOCALITY_PROCESS" ]
+}

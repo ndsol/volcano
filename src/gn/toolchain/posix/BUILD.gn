@@ -1,0 +1,79 @@
+# Copyright (c) 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPLv3.
+import("//src/gn/toolchain/gcc_toolchain.gni")
+import("//src/gn/toolchain/posix/settings.gni")
+
+template("gcc_toolchain_helper") {
+  gcc_toolchain(target_name) {
+    forward_variables_from(invoker, "*")
+  }
+
+  gcc_toolchain("host_$target_name") {
+    forward_variables_from(invoker, "*")
+    toolchain_args.current_os = host_os
+  }
+}
+
+gcc_toolchain_helper("clang_x86") {
+  cc = clang_cc
+  cxx = clang_cxx
+  ld = cxx
+
+  readelf = readelf
+  ar = ar
+  nm = nm
+
+  toolchain_args = {
+    current_cpu = "x86"
+    current_os = target_os
+    is_clang = true
+  }
+}
+
+gcc_toolchain_helper("x86") {
+  cc = gcc_cc
+  cxx = gcc_cxx
+  ld = cxx
+
+  readelf = readelf
+  ar = ar
+  nm = nm
+
+  toolchain_args = {
+    current_cpu = "x86"
+    current_os = target_os
+    is_clang = false
+  }
+}
+
+gcc_toolchain_helper("clang_x64") {
+  cc = clang_cc
+  cxx = clang_cxx
+  ld = cxx
+
+  readelf = readelf
+  ar = ar
+  nm = nm
+
+  toolchain_args = {
+    current_cpu = "x64"
+    current_os = target_os
+    is_clang = true
+  }
+}
+
+gcc_toolchain_helper("x64") {
+  cc = gcc_cc
+  cxx = gcc_cxx
+  ld = cxx
+
+  readelf = readelf
+  ar = ar
+  nm = nm
+
+  toolchain_args = {
+    current_cpu = "x64"
+    current_os = target_os
+    is_clang = false
+  }
+}

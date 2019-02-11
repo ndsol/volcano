@@ -1,0 +1,31 @@
+# Copyright 2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+#
+# On posix platforms, use system zlib. Win does not ship zlib
+# in a well-known place, so use the one built as part of skia.
+
+import("//src/gn/vendor/subgnDefines.gni")
+
+config("zlib_config") {
+  if (is_win) {
+    # Win does not ship zlib in a well-known place, so use skia.
+    include_dirs = [ volcano_prefix + "vendor/skia/third_party/externals/zlib" ]
+  }
+}
+
+# this is a source_set deliberately to not add anything to the build
+# process except libs and configs
+source_set("zlib") {
+  if (is_win) {
+    all_dependent_configs = [
+      ":zlib_config"
+    ]
+    libs = [ "$root_build_dir/$skiasubdir/zlib.lib" ]
+    if (target_cpu == "x86" || target_cpu == "x64") {
+      libs += [ "$root_build_dir/$skiasubdir/zlib_x86.lib" ]
+    }
+  } else {
+    libs = [ "z" ]
+  }
+  sources = []
+}

@@ -1,0 +1,237 @@
+# Copyright 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+
+declare_args() {
+  # Formats with significant bugs:
+  use_c4d_nonfree_importer = false # Only supports MSVC on Windows.
+  use_assimp_blend = false # BlenderDNA.h is broken.
+  use_assimp_hmp_and_mdl = false # MDLFileData.h is broken.
+
+  # Normal formats. Use "gn args" to enable.
+  use_assimp_amf = false
+  use_assimp_3ds = false
+  use_assimp_ac = false
+  use_assimp_ase = false
+  use_assimp_assbin = true
+  use_assimp_assxml = false # assimp can only export .assxml files
+  use_assimp_b3d = false
+  use_assimp_bvh = false
+  use_assimp_collada = false
+  use_assimp_dxf = false
+  use_assimp_csm = false
+  use_assimp_irr = false
+  use_assimp_lwo_and_lws = false
+  use_assimp_md2 = false
+  use_assimp_md3 = false
+  use_assimp_md5 = false
+  use_assimp_mdc = false # assimp can only import .mdc files
+  use_assimp_nff = false
+  use_assimp_ndo = false
+  use_assimp_obj = false
+  use_assimp_off = false
+  use_assimp_ogre = false
+  use_assimp_opengex = false
+  use_assimp_ply = false
+  use_assimp_ms3d = false
+  use_assimp_cob = false
+  use_assimp_xgl = false
+  use_assimp_fbx = false
+  use_assimp_q3d = false
+  use_assimp_q3bsp = false
+  use_assimp_raw = false
+  use_assimp_sib = false
+  use_assimp_smd = false
+  use_assimp_stl = false
+  use_assimp_terragen = false
+  use_assimp_3d = false
+  use_assimp_importer_x = false
+  use_assimp_x3d = false
+  use_assimp_gltf = false
+  use_assimp_3mf = false
+  use_assimp_mmd = false
+}
+
+#
+# Calculate a string assimp_formats with the name of each enabled format.
+#
+assimp_formats = ""
+assimp_defines = []
+if (!use_c4d_nonfree_importer) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_C4D_IMPORTER" ]
+} else { assimp_formats += " c4d" }
+if (!use_assimp_blend) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_BLEND_IMPORTER",
+    "ASSIMP_BUILD_NO_IFC_IMPORTER",
+  ]
+} else { assimp_formats += " blend" }
+if (!use_assimp_hmp_and_mdl) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_MDL_IMPORTER",
+    "ASSIMP_BUILD_NO_HMP_IMPORTER",
+  ]
+} else { assimp_formats += " mdl hmp" }
+if (!use_assimp_amf) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_AMF_IMPORTER" ]
+} else { assimp_formats += " amf" }
+if (!use_assimp_3ds) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_3DS_IMPORTER",
+    "ASSIMP_BUILD_NO_3DS_EXPORTER",
+  ]
+} else { assimp_formats += " 3ds" }
+if (!use_assimp_ac) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_AC_IMPORTER" ]
+} else { assimp_formats += " ac" }
+if (!use_assimp_ase) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_ASE_IMPORTER" ]
+} else { assimp_formats += " ase" }
+if (!use_assimp_assbin) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_ASSBIN_IMPORTER",
+    "ASSIMP_BUILD_NO_ASSBIN_EXPORTER",
+  ]
+} else { assimp_formats += " assbin" }
+if (!use_assimp_assxml) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_ASSXML_IMPORTER",
+    "ASSIMP_BUILD_NO_ASSXML_EXPORTER",
+  ]
+} else { assimp_formats += " assxml" }
+if (!use_assimp_b3d) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_B3D_IMPORTER" ]
+} else { assimp_formats += " b3d" }
+if (!use_assimp_bvh) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_BVH_IMPORTER" ]
+} else { assimp_formats += " bvh" }
+if (!use_assimp_collada) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_COLLADA_IMPORTER",
+    "ASSIMP_BUILD_NO_COLLADA_EXPORTER",
+  ]
+} else { assimp_formats += " collada" }
+if (!use_assimp_dxf) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_DXF_IMPORTER" ]
+} else { assimp_formats += " dxf" }
+if (!use_assimp_csm) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_CSM_IMPORTER" ]
+} else { assimp_formats += " csm" }
+if (!use_assimp_irr) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_IRR_IMPORTER",
+    "ASSIMP_BUILD_NO_IRR_EXPORTER",
+    "ASSIMP_BUILD_NO_IRRMESH_IMPORTER",
+  ]
+} else { assimp_formats += " irr" }
+if (!use_assimp_lwo_and_lws) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_LWO_IMPORTER",
+    "ASSIMP_BUILD_NO_LWS_IMPORTER",
+  ]
+} else { assimp_formats += " lwo_and_lws" }
+if (!use_assimp_md2) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_MD2_IMPORTER" ]
+} else { assimp_formats += " md2" }
+if (!use_assimp_md3) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_MD3_IMPORTER" ]
+} else { assimp_formats += " md3" }
+if (!use_assimp_md5) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_MD5_IMPORTER" ]
+} else { assimp_formats += " md5" }
+if (!use_assimp_mdc) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_MDC_IMPORTER" ]
+} else { assimp_formats += " mdc" }
+if (!use_assimp_nff) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_NFF_IMPORTER" ]
+} else { assimp_formats += " nff" }
+if (!use_assimp_ndo) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_NDO_IMPORTER" ]
+} else { assimp_formats += " ndo" }
+if (!use_assimp_obj) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_OBJ_EXPORTER",
+    "ASSIMP_BUILD_NO_OBJ_IMPORTER",
+  ]
+} else { assimp_formats += " obj" }
+if (!use_assimp_off) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_OFF_IMPORTER" ]
+} else { assimp_formats += " off" }
+if (!use_assimp_ogre) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_OGRE_IMPORTER" ]
+} else { assimp_formats += " ogre" }
+if (!use_assimp_opengex) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_OPENGEX_IMPORTER" ]
+} else { assimp_formats += " opengex" }
+if (!use_assimp_ply) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_PLY_IMPORTER",
+    "ASSIMP_BUILD_NO_PLY_EXPORTER",
+  ]
+} else { assimp_formats += " ply" }
+if (!use_assimp_ms3d) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_MS3D_IMPORTER" ]
+} else { assimp_formats += " ms3d" }
+if (!use_assimp_cob) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_COB_IMPORTER" ]
+} else { assimp_formats += " cob" }
+if (!use_assimp_xgl) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_XGL_IMPORTER" ]
+} else { assimp_formats += " xgl" }
+if (!use_assimp_fbx) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_FBX_IMPORTER" ]
+} else { assimp_formats += " fbx" }
+if (!use_assimp_q3d) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_Q3D_IMPORTER" ]
+} else { assimp_formats += " q3d" }
+if (!use_assimp_q3bsp) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_Q3BSP_IMPORTER" ]
+} else { assimp_formats += " q3bsp" }
+if (!use_assimp_raw) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_RAW_IMPORTER" ]
+} else { assimp_formats += " raw" }
+if (!use_assimp_sib) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_SIB_IMPORTER" ]
+} else { assimp_formats += " sib" }
+if (!use_assimp_smd) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_SMD_IMPORTER" ]
+} else { assimp_formats += " smd" }
+if (!use_assimp_stl) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_STL_IMPORTER",
+    "ASSIMP_BUILD_NO_STL_EXPORTER",
+  ]
+} else { assimp_formats += " stl" }
+if (!use_assimp_terragen) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_TERRAGEN_IMPORTER" ]
+} else { assimp_formats += " terragen" }
+if (!use_assimp_3d) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_3D_IMPORTER" ]
+} else { assimp_formats += " 3d" }
+if (!use_assimp_importer_x) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_X_IMPORTER",
+    "ASSIMP_BUILD_NO_X_EXPORTER",
+  ]
+} else { assimp_formats += " x" }
+if (!use_assimp_x3d) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_X3D_IMPORTER",
+    "ASSIMP_BUILD_NO_X3D_EXPORTER",
+  ]
+} else { assimp_formats += " x3d" }
+if (!use_assimp_gltf) {
+  assimp_defines += [
+    "ASSIMP_BUILD_NO_GLTF_IMPORTER",
+    "ASSIMP_BUILD_NO_GLTF_EXPORTER",
+  ]
+} else { assimp_formats += " gltf" }
+if (!use_assimp_3mf) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_3MF_IMPORTER" ]
+} else { assimp_formats += " 3mf" }
+if (!use_assimp_mmd) {
+  assimp_defines += [ "ASSIMP_BUILD_NO_MMD_IMPORTER" ]
+} else { assimp_formats += " mmd" }
+
+if (assimp_formats == "") {
+  assimp_defines += [ "ASSIMP_BUILD_NO_VALIDATEDS_PROCESS" ]
+}

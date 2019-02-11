@@ -1,0 +1,103 @@
+if (is_clang) {
+  import("../clang.gni")
+}
+
+declare_args() {
+  # Version of Visual Studio pointed to by the visual_studio_path.
+  # Use "2013" for Visual Studio 2013.
+  visual_studio_version = ""
+
+  # Path to Visual Studio.
+  visual_studio_path = ""
+
+  # Full path to the Windows SDK, not including a backslash at the end.
+  # This value is the default location, override if you have a different
+  # installation location.
+  windows_sdk_path = ""
+
+  # Value of the _MSC_VER variable.
+  # see: https://msdn.microsoft.com/en-us/library/b0084kay.aspx
+  msc_ver = 0
+
+  # Value of the _MSC_FULL_VER variable.
+  # see: https://msdn.microsoft.com/en-us/library/b0084kay.aspx
+  msc_full_ver = 0
+
+  # Turn this on to use /MD and /MDd (selects the dynamic CRT for a DLL)
+  use_dynamic_crt = false
+}
+
+if (is_win && visual_studio_path == "") {
+  visual_studio_path = exec_script("toolchain.py",
+                                   [
+                                     "get_vs_dir",
+                                     "2015",
+                                   ],
+                                   "trim string")
+  if (visual_studio_path != "") {
+    visual_studio_version = "2015"
+  } else {
+    visual_studio_path = exec_script("toolchain.py",
+                                     [
+                                       "get_vs_dir",
+                                       "2017",
+                                     ],
+                                     "trim string")
+    if (visual_studio_path == "") {
+      assert(false, "get_vs_dir 2017 could not find visual studio")
+    }
+    visual_studio_version = "2017"
+  }
+}
+
+if (is_clang) {
+  sys_include_prefix = "-imsvc"
+  _clang_base_path_arg = clang_base_path
+} else {
+  # MSVC doesn't have the concept of system headers.
+  sys_include_prefix = "/I"
+  _clang_base_path_arg = ""
+}
+
+if (host_os == "win") {
+  clang_cl = "clang-cl.exe"
+} else {
+  clang_cl = "clang-cl"
+}
+
+if (is_win) {
+  toolchain_data = exec_script("toolchain.py",
+                               [
+                                 "setup_toolchain",
+                                 visual_studio_version,
+                                 visual_studio_path,
+                                 sys_include_prefix,
+
+                                 # Don't use clang_base_path directly, so we
+                                 # can skip clang detection if not needed
+                                 # (i.e. !is_clang).
+                                 _clang_base_path_arg,
+                               ],
+                               "scope")
+
+  if (windows_sdk_path == "") {
+    windows_sdk_path = toolchain_data.windows_sdk_path
+  }
+
+  if (msc_ver == 0) {
+    msc_ver = toolchain_data.msc_ver
+  }
+
+  if (msc_full_ver == 0) {
+    msc_full_ver = toolchain_data.msc_full_ver
+  }
+
+  if (is_clang) {
+    win_clang_version = toolchain_data.clang_version
+  }
+}
+
+# These are hardcoded in toolchain.py
+x86_environment_path = "environment.x86"
+x64_environment_path = "environment.x64"
+# TODO(tim): WinRT

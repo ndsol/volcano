@@ -1,0 +1,33 @@
+# Copyright 2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+import("//src/gn/vendor/subgnDefines.gni")
+
+declare_args() {
+  vma_root = rebase_path(volcano_prefix + "vendor/vulkanmemoryallocator", ".",
+                         rebase_path(target_out_dir, root_build_dir)) + "/"
+}
+
+config("pub_cfg") {
+  if (is_win) {
+    cflags = [
+      # equivalent to #pragma warning(disable: NNNN)
+      "/IGNORE:4127", # (disable: 4127) "conditional expression is constant"
+      "/IGNORE:4100", # (disable: 4100) "unreferenced formal parameter"
+      "/IGNORE:4189", # "local variable is initialized but not referenced"
+    ]
+  }
+  include_dirs = [ vma_root ]
+}
+
+source_set("vulkanmemoryallocator") {
+  public_configs = [ ":pub_cfg" ]
+  if (is_win) {
+    public_configs += [ "//src/gn/config/win:nominmax" ]
+  }
+  sources = [ "vma_impl.cpp" ]
+  deps = [ volcano_prefix + ":language" ]
+}
+
+group("default") {
+  deps = [ ":vulkanmemoryallocator" ]
+}

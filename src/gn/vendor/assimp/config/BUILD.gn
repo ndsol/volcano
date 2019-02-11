@@ -1,0 +1,74 @@
+# Copyright 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+
+config("no_unused_parameter") {
+  if (!is_win) {
+    cflags = [ "-Wno-unused-parameter" ]
+  }
+}
+
+config("no_strict_aliasing") {
+  if (!is_win) {
+    cflags = [ "-fno-strict-aliasing" ]
+  }
+}
+
+config("no_maybe_uninitialized") {
+  if (!is_win && !is_mac) {
+    cflags = [ "-Wno-maybe-uninitialized" ]
+  }
+}
+
+config("no_unused_function") {
+  if (!is_win) {
+    cflags = [ "-Wno-unused-function" ]
+  }
+}
+
+config("no_unused_but_set_variable") {
+  if (is_posix && !is_clang) {
+    cflags = [ "-Wno-unused-but-set-variable" ]
+  }
+}
+
+config("no_unused_variable") {
+  if (!is_win) {
+    cflags = [ "-Wno-unused-variable" ]
+  }
+}
+
+config("no_incompatible_pointer_types") {
+  if (!is_win) {
+    cflags = [ "-Wno-incompatible-pointer-types" ]
+  }
+}
+
+config("no_type_limits") {
+  if (!is_win) {
+    cflags = [ "-Wno-type-limits" ]
+  }
+}
+
+config("no_parentheses") {
+  if (!is_win) {
+    cflags = [ "-Wno-parentheses" ]
+  }
+}
+
+config("no_misleading_indentation") {
+  if (!is_win && !is_clang) {
+    cflags = [ "-Wno-misleading-indentation" ]
+  }
+}
+
+config("no_tautological_compare") {
+  if (!is_win && !is_clang) {
+    cflags = [ "-Wno-tautological-compare" ]
+  }
+}
+
+config("no_class_memaccess") {
+  if (!is_win && !is_clang) {
+    cflags = [ "-Wno-class-memaccess" ]
+  }
+}

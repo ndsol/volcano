@@ -1,0 +1,118 @@
+# Copyright 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+import("../subgnDefines.gni")
+import("../spirvDefines.gni")
+if (is_win) {
+  import("//src/gn/toolchain/win/settings.gni")
+}
+
+declare_args() {
+  spirv_cross = rebase_path(volcano_prefix + "vendor/spirv_cross", ".",
+                            rebase_path(target_out_dir, root_build_dir)) + "/"
+}
+
+config("spirv_cross_config") {
+  if (!use_spirv_cross_exceptions) {
+    defines = [ "SPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS" ]
+  }
+  if (is_win) {
+    defines += [ "_HAS_EXCEPTIONS=0" ] # disable exceptions in STL
+    if (!use_dynamic_crt) {
+      defines += [ "_STATIC_CPPLIB" ] # also needed to disable exceptions
+    }
+  }
+}
+
+config("spirv_cross_private_config") {
+  if (is_win) {
+    cflags = [
+      "/wd4715",  # Disable "not all control paths return a value" warning
+    ]
+  } else {
+    cflags = [
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wshadow",
+    ]
+    defines = [ "__STDC_LIMIT_MACROS" ]
+  }
+}
+
+source_set("spirv-cross-core") {
+  sources = [
+    spirv_cross + "spirv_cross.cpp",
+    spirv_cross + "spirv_parser.cpp",
+    spirv_cross + "spirv_cross_parsed_ir.cpp",
+    spirv_cross + "spirv_cfg.cpp",
+  ]
+  configs += [
+    ":spirv_cross_config",
+    ":spirv_cross_private_config",
+  ]
+}
+
+source_set("spirv-cross-glsl") {
+  sources = [ spirv_cross + "spirv_glsl.cpp" ]
+  deps = [ ":spirv-cross-core" ]
+  configs += [
+    ":spirv_cross_config",
+    ":spirv_cross_private_config",
+  ]
+}
+
+source_set("spirv-cross-cpp") {
+  sources = [ spirv_cross + "spirv_cpp.cpp" ]
+  deps = [ ":spirv-cross-core" ]
+  configs += [
+    ":spirv_cross_config",
+    ":spirv_cross_private_config",
+  ]
+}
+
+source_set("spirv-cross-reflect") {
+  sources = [ spirv_cross + "spirv_reflect.cpp" ]
+  deps = [ ":spirv-cross-core" ]
+  configs += [
+    ":spirv_cross_config",
+    ":spirv_cross_private_config",
+  ]
+}
+
+source_set("spirv-cross-msl") {
+  sources = [ spirv_cross + "spirv_msl.cpp" ]
+  deps = [
+    ":spirv-cross-core",
+    ":spirv-cross-glsl",
+  ]
+  configs += [
+    ":spirv_cross_config",
+    ":spirv_cross_private_config",
+  ]
+}
+
+source_set("spirv-cross-hlsl") {
+  sources = [ spirv_cross + "spirv_hlsl.cpp" ]
+  deps = [ ":spirv-cross-core" ]
+  configs += [
+    ":spirv_cross_config",
+    ":spirv_cross_private_config",
+  ]
+}
+
+source_set("spirv-cross-util") {
+  sources = [ spirv_cross + "spirv_cross_util.cpp" ]
+  deps = [ ":spirv-cross-core" ]
+  configs += [
+    ":spirv_cross_config",
+    ":spirv_cross_private_config",
+  ]
+}
+
+group("spirv_cross") {
+  deps = [
+    ":spirv-cross-core",
+    ":spirv-cross-glsl",
+  ]
+  public_configs = [ ":spirv_cross_config" ]
+}

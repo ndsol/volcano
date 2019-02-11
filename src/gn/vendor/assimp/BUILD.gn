@@ -1,0 +1,1066 @@
+# Copyright 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+
+declare_args() {
+  use_assimp_open3dgc = true # If "ld: cannot find -lrt", change to false.
+  assimp_root = rebase_path("//vendor/assimp", ".",
+                            rebase_path(target_out_dir, root_build_dir))
+}
+
+# postprocessing.gni will import formats.gni.
+import("postprocessing.gni")
+
+template("assimp_source_set") {
+  source_set(target_name) {
+    forward_variables_from(invoker, "*")
+    configs += [
+      ":assimp_config",
+      ":assimp_local_config",
+    ]
+    if (defined(configs_add)) {
+      configs += configs_add
+    }
+    if (defined(configs_del)) {
+      configs -= configs_del
+    }
+    configs -= [ "//src/gn/config:no_exceptions" ]
+    configs += [ "//src/gn/config:exceptions" ]
+    if (!defined(deps)) {
+      deps = []
+    }
+    deps += [
+      ":config.h",
+      ":revision.h",
+    ]
+  }
+}
+
+template("assimp_target") {
+  target(invoker.assimp_target_type, target_name) {
+    forward_variables_from(invoker, "*")
+    configs += [
+      ":assimp_config",
+      ":assimp_local_config",
+    ]
+    if (defined(configs_add)) {
+      configs += configs_add
+    }
+    configs -= [ "//src/gn/config:no_exceptions" ]
+    configs += [ "//src/gn/config:exceptions" ]
+    if (!defined(deps)) {
+      deps = []
+    }
+    deps += [
+      ":config.h",
+      ":revision.h",
+    ]
+  }
+}
+
+template("assimpConfigure") {
+  action(target_name) {
+    forward_variables_from(invoker, "*")
+    script = "//src/gn/vendor/assimpConfigure.py"
+    args = []
+    foreach(file, inputs) {
+      args += [ "-i", rebase_path(file) ]
+    }
+    foreach(file, outputs) {
+      args += [ "-o", rebase_path(file) ]
+    }
+    if (defined(extra_args)) {
+      args += extra_args
+    }
+  }
+}
+
+assimpConfigure("config.h") {
+  inputs = [ "$assimp_root/include/assimp/config.h.in" ]
+  outputs = [ "$target_gen_dir/assimp/config.h" ]
+}
+
+assimpConfigure("revision.h") {
+  inputs = [ "$assimp_root/revision.h.in" ]
+  outputs = [ "$target_gen_dir/revision.h" ]
+  extra_args = [
+    "-d", "GIT_COMMIT_HASH=1234567",
+    "-d", "GIT_BRANCH=HEAD",
+  ]
+}
+
+config("assimp_config") {
+  include_dirs = [
+    "$assimp_root/include",
+    "$assimp_root/contrib/irrXML",
+    "$target_gen_dir",
+  ]
+  defines = assimp_defines + [ "ASSIMP_BUILD_NO_OWN_ZLIB" ]
+  if (use_assimp_open3dgc) {
+    defines += [ "ASSIMP_IMPORTER_GLTF_USE_OPEN3DGC=1" ]
+  }
+  if (use_assimp_opengex) {
+    defines += [
+      "OPENDDLPARSER_BUILD",
+      "OPENDDL_NO_USE_CPP11",
+    ]
+  }
+
+  if (!use_assimp_exporter) {
+    defines += [ "ASSIMP_BUILD_NO_EXPORT" ]
+  }
+  if (is_posix) {
+    # This is only needed for 32-bit posix, but has no effect if used on 64-bit.
+    defines += [ "_FILE_OFFSET_BITS=64" ]
+  }
+}
+
+config("assimp_local_config") {
+  include_dirs = [ "$assimp_root" ]
+  if (is_win) {
+    # Win does not ship zlib in a well-known place, so use skia.
+    include_dirs += [
+      "$assimp_root/../volcano/vendor/skia/third_party/externals/zlib",
+    ]
+  } else {
+    # gcc GenericProperty.h:114:8: warning 'inline const bool' const ignored.
+    cflags = [ "-Wno-ignored-qualifiers" ]
+  }
+}
+
+#
+# Helper and utility libraries.
+#
+
+assimp_source_set("IrrXML") {
+  sources = [ "$assimp_root/contrib/irrXML/irrXML.cpp" ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
+}
+
+config("openddl_config") {
+  include_dirs = [ "$assimp_root/contrib/openddlparser/include" ]
+}
+
+source_set("openddl_suppress_more_warnings") {
+  sources = [
+    "$assimp_root/contrib/openddlparser/code/DDLNode.cpp",
+    "$assimp_root/contrib/openddlparser/code/Value.cpp",
+  ]
+  configs += [
+    "config:no_unused_parameter",
+    ":openddl_config",
+  ]
+}
+
+source_set("openddl") {
+  sources = [
+    "$assimp_root/contrib/openddlparser/code/OpenDDLParser.cpp",
+    "$assimp_root/contrib/openddlparser/code/OpenDDLCommon.cpp",
+    "$assimp_root/contrib/openddlparser/code/OpenDDLExport.cpp",
+    "$assimp_root/contrib/openddlparser/code/OpenDDLStream.cpp",
+  ]
+  public_configs = [
+    ":assimp_config",
+    ":assimp_local_config",
+    ":openddl_config",
+  ]
+  deps = [ ":openddl_suppress_more_warnings" ]
+}
+
+config("open3dgc_config") {
+  include_dirs = [ "$assimp_root/contrib" ]
+}
+
+source_set("open3dgc") {
+  sources = [
+    "$assimp_root/contrib/Open3DGC/o3dgcArithmeticCodec.cpp",
+    "$assimp_root/contrib/Open3DGC/o3dgcDynamicVectorDecoder.cpp",
+    "$assimp_root/contrib/Open3DGC/o3dgcDynamicVectorEncoder.cpp",
+    "$assimp_root/contrib/Open3DGC/o3dgcTools.cpp",
+    "$assimp_root/contrib/Open3DGC/o3dgcTriangleFans.cpp",
+  ]
+  public_configs = [
+    ":assimp_config",
+    ":assimp_local_config",
+    ":open3dgc_config",
+  ]
+  configs -= [ "//src/gn/config:strict-overflow" ]
+}
+
+source_set("poly2tri") {
+  sources = [
+    "$assimp_root/contrib/poly2tri/poly2tri/common/shapes.cc",
+    "$assimp_root/contrib/poly2tri/poly2tri/sweep/advancing_front.cc",
+    "$assimp_root/contrib/poly2tri/poly2tri/sweep/cdt.cc",
+    "$assimp_root/contrib/poly2tri/poly2tri/sweep/sweep.cc",
+    "$assimp_root/contrib/poly2tri/poly2tri/sweep/sweep_context.cc",
+  ]
+  configs -= [ "//src/gn/config:no_exceptions" ]
+  configs += [ "//src/gn/config:exceptions" ]
+}
+
+config("unzip_config") {
+  include_dirs = [ "$assimp_root/contrib/unzip" ]
+  if (!is_win) {
+    cflags = [ "-Wno-unused-parameter" ]
+  }
+}
+
+source_set("unzip") {
+  sources = [
+    "$assimp_root/contrib/unzip/ioapi.c",
+    "$assimp_root/contrib/unzip/unzip.c",
+  ]
+  configs += [
+    "config:no_unused_variable",
+    "config:no_incompatible_pointer_types",
+  ]
+  public_configs = [
+    ":unzip_config",
+    ":assimp_config",
+    "config:no_parentheses",
+  ]
+}
+
+assimp_source_set("clipper") {
+  sources = [ "$assimp_root/contrib/clipper/clipper.cpp" ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
+}
+
+assimp_source_set("assimp_target_animation") {
+  sources = [ "$assimp_root/code/TargetAnimation.cpp" ]
+}
+
+assimp_source_set("assimp_remove_comments") {
+  sources = [ "$assimp_root/code/RemoveComments.cpp" ]
+}
+
+assimp_source_set("assimp_standard_shapes") {
+  sources = [ "$assimp_root/code/StandardShapes.cpp" ]
+}
+
+assimp_source_set("assimp_vertex_triangle_adjacency") {
+  sources = [ "$assimp_root/code/VertexTriangleAdjacency.cpp" ]
+}
+
+assimp_source_set("assimp_subdivision") {
+  sources = [ "$assimp_root/code/Subdivision.cpp" ]
+  deps = [ ":assimp_vertex_triangle_adjacency" ]
+}
+
+assimp_source_set("assimp_validate_data_structure") {
+  sources = [ "$assimp_root/code/ValidateDataStructure.cpp" ]
+}
+
+assimp_source_set("assimp_skeleton_mesh_builder") {
+  sources = [ "$assimp_root/code/SkeletonMeshBuilder.cpp" ]
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#
+# Importers
+#
+
+assimp_source_set("importer_amf") {
+  sources = [
+    "$assimp_root/code/AMFImporter.cpp",
+    "$assimp_root/code/AMFImporter_Geometry.cpp",
+    "$assimp_root/code/AMFImporter_Material.cpp",
+    "$assimp_root/code/AMFImporter_Postprocess.cpp",
+  ]
+  configs_add = [ "config:no_unused_parameter" ]
+  deps = [
+    ":assimp_standard_shapes",
+    ":IrrXML",
+  ]
+}
+
+assimp_source_set("importer_3ds") {
+  sources = [
+    "$assimp_root/code/3DSConverter.cpp",
+    "$assimp_root/code/3DSLoader.cpp",
+    "$assimp_root/code/3DSExporter.cpp",
+  ]
+  configs_add = [ "config:no_unused_parameter" ]
+  deps = [ ":assimp_target_animation" ]
+}
+
+assimp_source_set("importer_ac") {
+  sources = [ "$assimp_root/code/ACLoader.cpp" ]
+  deps = [ ":assimp_subdivision" ]
+}
+
+assimp_source_set("importer_ase") {
+  sources = [
+    "$assimp_root/code/ASELoader.cpp",
+    "$assimp_root/code/ASEParser.cpp",
+  ]
+  deps = [
+    ":assimp_target_animation",
+    ":assimp_skeleton_mesh_builder",
+  ]
+}
+
+assimp_source_set("importer_assbin") {
+  sources = [
+    "$assimp_root/code/AssbinExporter.cpp",
+    "$assimp_root/code/AssbinLoader.cpp",
+  ]
+  configs_add = [
+    "config:no_unused_parameter",
+    "config:no_strict_aliasing",
+  ]
+}
+
+assimp_source_set("importer_assxml") {
+  sources = [ "$assimp_root/code/AssxmlExporter.cpp" ]
+  configs_add = [ "config:no_unused_parameter" ]
+}
+
+assimp_source_set("importer_b3d") {
+  sources = [ "$assimp_root/code/B3DImporter.cpp" ]
+  deps = [ ":assimp_postprocessing" ]
+}
+
+assimp_source_set("importer_bvh") {
+  sources = [ "$assimp_root/code/BVHLoader.cpp" ]
+  deps = [ ":assimp_skeleton_mesh_builder" ]
+}
+
+assimp_source_set("importer_collada") {
+  sources = [
+    "$assimp_root/code/ColladaLoader.cpp",
+    "$assimp_root/code/ColladaParser.cpp",
+    "$assimp_root/code/ColladaExporter.cpp",
+    "$assimp_root/code/CreateAnimMesh.cpp",
+  ]
+  configs_add = [
+    "config:no_unused_parameter",
+    "config:no_maybe_uninitialized",
+  ]
+  deps = [
+    ":IrrXML",
+    ":assimp_skeleton_mesh_builder",
+  ]
+}
+
+assimp_source_set("importer_dxf") {
+  sources = [ "$assimp_root/code/DXFLoader.cpp" ]
+}
+
+assimp_source_set("importer_csm") {
+  sources = [ "$assimp_root/code/CSMLoader.cpp" ]
+  deps = [ ":assimp_skeleton_mesh_builder" ]
+}
+
+assimp_source_set("importer_hmp") {
+  sources = [ "$assimp_root/code/HMPLoader.cpp" ]
+  deps = [ ":importer_mdl" ]
+}
+
+assimp_source_set("importer_irr") {
+  sources = [
+    "$assimp_root/code/IRRLoader.cpp",
+    "$assimp_root/code/IRRMeshLoader.cpp",
+    "$assimp_root/code/IRRShared.cpp",
+  ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
+  deps = [
+    ":assimp_standard_shapes",
+    ":IrrXML",
+  ]
+}
+
+assimp_source_set("importer_lwo") {
+  sources = [
+    "$assimp_root/code/LWOAnimation.cpp",
+    "$assimp_root/code/LWOBLoader.cpp",
+    "$assimp_root/code/LWOLoader.cpp",
+    "$assimp_root/code/LWOMaterial.cpp",
+  ]
+}
+
+assimp_source_set("importer_lws") {
+  sources = [ "$assimp_root/code/LWSLoader.cpp" ]
+  deps = [
+    ":assimp_skeleton_mesh_builder",
+    ":importer_lwo",
+  ]
+}
+
+assimp_source_set("importer_md2") {
+  sources = [ "$assimp_root/code/MD2Loader.cpp" ]
+}
+
+assimp_source_set("importer_md3") {
+  sources = [ "$assimp_root/code/MD3Loader.cpp" ]
+  deps = [ ":assimp_remove_comments" ]
+}
+
+assimp_source_set("importer_md5") {
+  sources = [
+    "$assimp_root/code/MD5Loader.cpp",
+    "$assimp_root/code/MD5Parser.cpp",
+  ]
+  deps = [
+    ":assimp_remove_comments",
+    ":assimp_skeleton_mesh_builder",
+  ]
+}
+
+assimp_source_set("importer_mdc") {
+  sources = [ "$assimp_root/code/MDCLoader.cpp" ]
+}
+
+assimp_source_set("importer_mdl") {
+  sources = [
+    "$assimp_root/code/MDLLoader.cpp",
+    "$assimp_root/code/MDLMaterialLoader.cpp",
+  ]
+}
+
+assimp_source_set("importer_nff") {
+  sources = [ "$assimp_root/code/NFFLoader.cpp" ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
+  deps = [
+    ":assimp_remove_comments",
+    ":assimp_standard_shapes",
+  ]
+}
+
+assimp_source_set("importer_ndo") {
+  sources = [ "$assimp_root/code/NDOLoader.cpp" ]
+}
+
+assimp_source_set("importer_off") {
+  sources = [ "$assimp_root/code/OFFLoader.cpp" ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
+}
+
+assimp_source_set("importer_obj") {
+  sources = [
+    "$assimp_root/code/ObjFileImporter.cpp",
+    "$assimp_root/code/ObjFileMtlImporter.cpp",
+    "$assimp_root/code/ObjFileParser.cpp",
+    "$assimp_root/code/ObjExporter.cpp",
+  ]
+  configs_add = [ "config:no_unused_parameter" ]
+}
+
+assimp_source_set("importer_ogre") {
+  sources = [
+    "$assimp_root/code/OgreImporter.cpp",
+    "$assimp_root/code/OgreStructs.cpp",
+    "$assimp_root/code/OgreBinarySerializer.cpp",
+    "$assimp_root/code/OgreXmlSerializer.cpp",
+    "$assimp_root/code/OgreMaterial.cpp",
+  ]
+  deps = [ ":IrrXML" ]
+}
+
+assimp_source_set("importer_opengex") {
+  sources = [
+    "$assimp_root/code/OpenGEXExporter.cpp",
+    "$assimp_root/code/OpenGEXImporter.cpp",
+  ]
+  configs_add = [ "config:no_unused_parameter" ]
+  deps = [
+    ":assimp_make_verbose_format",
+    ":openddl",
+  ]
+}
+
+assimp_source_set("importer_ply") {
+  sources = [
+    "$assimp_root/code/PlyLoader.cpp",
+    "$assimp_root/code/PlyParser.cpp",
+    "$assimp_root/code/PlyExporter.cpp",
+  ]
+  configs_add = [
+    "config:no_unused_parameter",
+    "config:no_parentheses",
+  ]
+}
+
+assimp_source_set("importer_ms3d") {
+  sources = [ "$assimp_root/code/MS3DLoader.cpp" ]
+}
+
+assimp_source_set("importer_cob") {
+  sources = [ "$assimp_root/code/COBLoader.cpp" ]
+}
+
+assimp_source_set("importer_blend") {
+  sources = [
+    "$assimp_root/code/BlenderLoader.cpp",
+    "$assimp_root/code/BlenderDNA.cpp",
+    "$assimp_root/code/BlenderScene.cpp",
+    "$assimp_root/code/BlenderModifier.cpp",
+    "$assimp_root/code/BlenderBMesh.cpp",
+    "$assimp_root/code/BlenderTessellator.cpp",
+  ]
+  configs_add = [ "config:no_strict_aliasing" ]
+  deps = [
+    ":assimp_subdivision",
+    ":poly2tri",
+  ]
+}
+
+assimp_source_set("importer_ifc") {
+  sources = [
+    "$assimp_root/code/IFCLoader.cpp",
+    "$assimp_root/code/IFCReaderGen1.cpp",
+    "$assimp_root/code/IFCReaderGen2.cpp",
+    "$assimp_root/code/IFCUtil.cpp",
+    "$assimp_root/code/IFCGeometry.cpp",
+    "$assimp_root/code/IFCMaterial.cpp",
+    "$assimp_root/code/IFCProfile.cpp",
+    "$assimp_root/code/IFCCurve.cpp",
+    "$assimp_root/code/IFCBoolean.cpp",
+    "$assimp_root/code/IFCOpenings.cpp",
+    "$assimp_root/code/STEPFileReader.cpp",
+    "$assimp_root/code/STEPFileEncoding.cpp",
+  ]
+  deps = [
+    ":clipper",
+    ":unzip",
+    ":importer_blend", # For p2t.
+  ]
+}
+
+assimp_source_set("importer_xgl") {
+  sources = [ "$assimp_root/code/XGLLoader.cpp" ]
+  deps = [ ":IrrXML" ]
+}
+
+assimp_source_set("importer_fbx_suppress_more_warnings") {
+  sources = [
+    "$assimp_root/code/FBXParser.cpp",
+    "$assimp_root/code/FBXBinaryTokenizer.cpp",
+  ]
+  configs_add = [
+    "config:no_unused_parameter",
+    "config:no_unused_function",
+    "config:no_maybe_uninitialized",
+  ]
+}
+
+assimp_source_set("importer_fbx") {
+  sources = [
+    "$assimp_root/code/FBXImporter.cpp",
+    "$assimp_root/code/FBXTokenizer.cpp",
+    "$assimp_root/code/FBXConverter.cpp",
+    "$assimp_root/code/FBXUtil.cpp",
+    "$assimp_root/code/FBXDocument.cpp",
+    "$assimp_root/code/FBXProperties.cpp",
+    "$assimp_root/code/FBXMeshGeometry.cpp",
+    "$assimp_root/code/FBXMaterial.cpp",
+    "$assimp_root/code/FBXModel.cpp",
+    "$assimp_root/code/FBXAnimation.cpp",
+    "$assimp_root/code/FBXNodeAttribute.cpp",
+    "$assimp_root/code/FBXDeformer.cpp",
+    "$assimp_root/code/FBXDocumentUtil.cpp",
+  ]
+  configs_add = [ "config:no_maybe_uninitialized" ]
+  deps = [ ":importer_fbx_suppress_more_warnings" ]
+}
+
+assimp_source_set("importer_q3d") {
+  sources = [ "$assimp_root/code/Q3DLoader.cpp" ]
+}
+
+assimp_source_set("importer_q3bsp") {
+  sources = [
+    "$assimp_root/code/Q3BSPFileParser.cpp",
+    "$assimp_root/code/Q3BSPFileImporter.cpp",
+    "$assimp_root/code/Q3BSPZipArchive.cpp",
+  ]
+  deps = [ ":unzip" ]
+}
+
+assimp_source_set("importer_raw") {
+  sources = [ "$assimp_root/code/RawLoader.cpp" ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
+}
+
+assimp_source_set("importer_sib") {
+  sources = [ "$assimp_root/code/SIBImporter.cpp" ]
+  configs_add = [ "config:no_unused_parameter" ]
+}
+
+assimp_source_set("importer_smd") {
+  sources = [ "$assimp_root/code/SMDLoader.cpp" ]
+  deps = [ ":assimp_skeleton_mesh_builder" ]
+}
+
+assimp_source_set("importer_stl") {
+  sources = [
+    "$assimp_root/code/STLLoader.cpp",
+    "$assimp_root/code/STLExporter.cpp",
+  ]
+  configs_add = [
+    "config:no_unused_parameter",
+    "config:no_type_limits",
+  ]
+}
+
+assimp_source_set("importer_terragen") {
+  sources = [ "$assimp_root/code/TerragenLoader.cpp" ]
+}
+
+assimp_source_set("importer_3d") {
+  sources = [ "$assimp_root/code/UnrealLoader.cpp" ]
+}
+
+assimp_source_set("importer_x") {
+  sources = [
+    "$assimp_root/code/XFileImporter.cpp",
+    "$assimp_root/code/XFileParser.cpp",
+    "$assimp_root/code/XFileExporter.cpp",
+  ]
+}
+
+assimp_source_set("importer_x3d") {
+  sources = [
+    "$assimp_root/code/X3DExporter.cpp",
+    "$assimp_root/code/X3DImporter.cpp",
+    "$assimp_root/code/X3DImporter_Geometry2D.cpp",
+    "$assimp_root/code/X3DImporter_Geometry3D.cpp",
+    "$assimp_root/code/X3DImporter_Group.cpp",
+    "$assimp_root/code/X3DImporter_Light.cpp",
+    "$assimp_root/code/X3DImporter_Metadata.cpp",
+    "$assimp_root/code/X3DImporter_Networking.cpp",
+    "$assimp_root/code/X3DImporter_Postprocess.cpp",
+    "$assimp_root/code/X3DImporter_Rendering.cpp",
+    "$assimp_root/code/X3DImporter_Shape.cpp",
+    "$assimp_root/code/X3DImporter_Texturing.cpp",
+    "$assimp_root/code/FIReader.cpp",
+    "$assimp_root/code/X3DVocabulary.cpp",
+  ]
+  configs_add = [
+    "config:no_unused_parameter",
+    "config:no_strict_aliasing",
+    "config:no_maybe_uninitialized"
+  ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
+  deps = [
+    ":assimp_standard_shapes",
+    ":IrrXML",
+  ]
+}
+
+config("rapidjson") {
+  include_dirs = [ "$assimp_root/contrib/rapidjson/include" ]
+}
+
+assimp_source_set("importer_gltf") {
+  sources = [
+    "$assimp_root/code/glTFImporter.cpp",
+    "$assimp_root/code/glTFExporter.cpp",
+    "$assimp_root/code/glTF2Exporter.cpp",
+  ]
+  configs_add = [
+    ":rapidjson",
+    "config:no_unused_parameter",
+    "config:no_maybe_uninitialized",
+    "config:no_unused_but_set_variable",
+  ]
+  deps = [ ":assimp_make_verbose_format" ]
+  if (use_assimp_open3dgc) {
+    deps += [ ":open3dgc" ]
+    if (!is_android) { # Android has these symbols in libc.
+      libs = [ "rt" ]
+    }
+  }
+}
+
+assimp_source_set("importer_3mf") {
+  sources = [
+    "$assimp_root/code/D3MFImporter.cpp",
+    "$assimp_root/code/D3MFOpcPackage.cpp",
+  ]
+  deps = [
+    ":unzip",
+    ":IrrXML",
+  ]
+}
+
+assimp_source_set("importer_mmd") {
+  sources = [
+    "$assimp_root/code/MMDImporter.cpp",
+    "$assimp_root/code/MMDPmxParser.cpp",
+  ]
+  configs_add = [ "config:no_unused_parameter" ]
+}
+
+# C4D is non-free, and only supports MSVC.
+assimp_source_set("importer_c4d") {
+  sources = [ "$assimp_root/code/C4DImporter.cpp" ]
+  include_dirs = [ "$assimp_root/contrib/Melange/includes" ]
+  libs = [ "WSock32.lib", "Winmm.lib" ]
+}
+
+assimp_source_set("assimp_importer") {
+  deps = []
+  if (assimp_formats != "") {
+    deps += [ ":assimp_validate_data_structure" ]
+  }
+
+  if (is_win && use_c4d_nonfree_importer) {
+    # C4D is non-free, and only supports MSVC.
+    deps += [ ":importer_c4d" ]
+  }
+  if (use_assimp_blend) {
+    # BlenderDNA.h: Compiler complains that Convert() is used but never defined
+    # Blender::Structure::Convert(T&, FileDatabase&) [T = Blender::Scene],
+    # because Scene code is in a separate file (put it in the right .cpp file
+    # and the warning goes away).
+    deps += [ ":importer_ifc" ] # Pulls in :importer_blend too.
+  }
+  if (use_assimp_hmp_and_mdl) {
+    # MDLFileData.h is broken: aiVector3D in struct Header should be
+    # typedef float MDLVector3[3]; instead. Compiler will complain!
+    deps += [ ":importer_hmp" ] # Pulls in :importer_mdl too.
+  }
+  if (use_assimp_amf) {
+    deps += [ ":importer_amf" ]
+  }
+  if (use_assimp_3ds) {
+    deps += [ ":importer_3ds" ]
+  }
+  if (use_assimp_ac) {
+    deps += [ ":importer_ac" ]
+  }
+  if (use_assimp_ase) {
+    deps += [ ":importer_ase" ]
+  }
+  if (use_assimp_assbin) {
+    deps += [ ":importer_assbin" ]
+  }
+  if (use_assimp_assxml) {
+    deps += [ ":importer_assxml" ]
+  }
+  if (use_assimp_b3d) {
+    deps += [ ":importer_b3d" ]
+  }
+  if (use_assimp_bvh) {
+    deps += [ ":importer_bvh" ]
+  }
+  if (use_assimp_collada) {
+    deps += [ ":importer_collada" ]
+  }
+  if (use_assimp_dxf) {
+    deps += [ ":importer_dxf" ]
+  }
+  if (use_assimp_dxf) {
+    deps += [ ":importer_dxf" ]
+  }
+  if (use_assimp_csm) {
+    deps += [ ":importer_csm" ]
+  }
+  if (use_assimp_irr) {
+    deps += [ ":importer_irr" ]
+  }
+  if (use_assimp_lwo_and_lws) {
+    deps += [ ":importer_lws" ]
+  }
+  if (use_assimp_md2) {
+    deps += [ ":importer_md2" ]
+  }
+  if (use_assimp_md3) {
+    deps += [ ":importer_md3" ]
+  }
+  if (use_assimp_md5) {
+    deps += [ ":importer_md5" ]
+  }
+  if (use_assimp_mdc) {
+    deps += [ ":importer_mdc" ]
+  }
+  if (use_assimp_nff) {
+    deps += [ ":importer_nff" ]
+  }
+  if (use_assimp_ndo) {
+    deps += [ ":importer_ndo" ]
+  }
+  if (use_assimp_obj) {
+    deps += [ ":importer_obj" ]
+  }
+  if (use_assimp_off) {
+    deps += [ ":importer_off" ]
+  }
+  if (use_assimp_ogre) {
+    deps += [ ":importer_ogre" ]
+  }
+  if (use_assimp_opengex) {
+    deps += [
+      ":importer_opengex",
+      ":openddl",
+    ]
+  }
+  if (use_assimp_ply) {
+    deps += [ ":importer_ply" ]
+  }
+  if (use_assimp_ms3d) {
+    deps += [ ":importer_ms3d" ]
+  }
+  if (use_assimp_cob) {
+    deps += [ ":importer_cob" ]
+  }
+  if (use_assimp_xgl) {
+    deps += [ ":importer_xgl" ]
+  }
+  if (use_assimp_fbx) {
+    deps += [ ":importer_fbx" ]
+  }
+  if (use_assimp_q3d) {
+    deps += [ ":importer_q3d" ]
+  }
+  if (use_assimp_q3bsp) {
+    deps += [ ":importer_q3bsp" ]
+  }
+  if (use_assimp_raw) {
+    deps += [ ":importer_raw" ]
+  }
+  if (use_assimp_sib) {
+    deps += [ ":importer_sib" ]
+  }
+  if (use_assimp_smd) {
+    deps += [ ":importer_smd" ]
+  }
+  if (use_assimp_stl) {
+    deps += [ ":importer_stl" ]
+  }
+  if (use_assimp_terragen) {
+    deps += [ ":importer_terragen" ]
+  }
+  if (use_assimp_3d) {
+    deps += [ ":importer_3d" ]
+  }
+  if (use_assimp_importer_x) {
+    deps += [ ":importer_x" ]
+  }
+  if (use_assimp_x3d) {
+    deps += [ ":importer_x3d" ]
+  }
+  if (use_assimp_gltf) {
+    deps += [ ":importer_gltf" ]
+  }
+  if (use_assimp_3mf) {
+    deps += [ ":importer_3mf" ]
+  }
+  if (use_assimp_mmd) {
+    deps += [ ":importer_mmd" ]
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#
+# Postprocessing
+#
+
+assimp_source_set("assimp_join_vertices_process") {
+  sources = [ "$assimp_root/code/JoinVerticesProcess.cpp" ]
+  deps = [ ":assimp_skeleton_mesh_builder" ]
+}
+
+assimp_source_set("assimp_improve_cache_locality_process") {
+  sources = [ "$assimp_root/code/ImproveCacheLocality.cpp" ]
+  deps = [ ":assimp_vertex_triangle_adjacency" ]
+}
+
+assimp_source_set("assimp_postprocessing") {
+  sources = []
+  if (use_assimp_process_makelefthanded ||
+      use_assimp_process_flipuvs ||
+      use_assimp_process_flipwindingorder) {
+    sources += [ "$assimp_root/code/ConvertToLHProcess.cpp" ]
+  }
+  if (use_assimp_process_removevc) {
+    sources += [ "$assimp_root/code/RemoveVCProcess.cpp" ]
+  }
+  if (use_assimp_process_remove_redundantmaterials) {
+    sources += [ "$assimp_root/code/RemoveRedundantMaterials.cpp" ]
+  }
+  if (use_assimp_process_findinstances) {
+    sources += [ "$assimp_root/code/FindInstancesProcess.cpp" ]
+  }
+  if (use_assimp_process_optimizegraph) {
+    sources += [ "$assimp_root/code/OptimizeGraph.cpp" ]
+  }
+  if (use_assimp_process_finddegenerates) {
+    sources += [ "$assimp_root/code/FindDegenerates.cpp" ]
+  }
+  if (use_assimp_process_genuvcoords) {
+    sources += [ "$assimp_root/code/ComputeUVMappingProcess.cpp" ]
+  }
+  if (use_assimp_process_transformtexcoords) {
+    sources += [ "$assimp_root/code/TextureTransform.cpp" ]
+  }
+  if (use_assimp_process_pretransformvertices) {
+    sources += [ "$assimp_root/code/PretransformVertices.cpp" ]
+  }
+  if (use_assimp_process_triangulate) {
+    sources += [ "$assimp_root/code/TriangulateProcess.cpp" ]
+  }
+  if (use_assimp_process_sortbyptype) {
+    sources += [ "$assimp_root/code/SortByPTypeProcess.cpp" ]
+  }
+  if (use_assimp_process_findinvaliddata) {
+    sources += [ "$assimp_root/code/FindInvalidDataProcess.cpp" ]
+  }
+  if (use_assimp_process_optimizemeshes) {
+    sources += [ "$assimp_root/code/OptimizeMeshes.cpp" ]
+  }
+  if (use_assimp_process_fixinfacingnormals) {
+    sources += [ "$assimp_root/code/FixNormalsStep.cpp" ]
+  }
+  if (use_assimp_process_splitbybonecount) {
+    sources += [ "$assimp_root/code/SplitByBoneCountProcess.cpp" ]
+  }
+  if (use_assimp_process_splitlargemeshes) {
+    sources += [ "$assimp_root/code/SplitLargeMeshes.cpp" ]
+  }
+  if (use_assimp_process_genfacenormals) {
+    sources += [ "$assimp_root/code/GenFaceNormalsProcess.cpp" ]
+  }
+  if (use_assimp_process_genvertexnormals) {
+    sources += [ "$assimp_root/code/GenVertexNormalsProcess.cpp" ]
+  }
+  if (use_assimp_process_calctangents) {
+    sources += [ "$assimp_root/code/CalcTangentsProcess.cpp" ]
+  }
+  if (use_assimp_process_debone) {
+    sources += [ "$assimp_root/code/DeboneProcess.cpp" ]
+  }
+  if (use_assimp_process_limitboneweights) {
+    sources += [ "$assimp_root/code/LimitBoneWeightsProcess.cpp" ]
+  }
+  deps = []
+  if (use_assimp_process_joinvertices) {
+    deps += [ ":assimp_join_vertices_process" ]
+  }
+  if (use_assimp_process_improvecachelocality) {
+    deps += [ ":assimp_improve_cache_locality_process" ]
+  }
+}
+
+assimp_source_set("assimp_make_verbose_format") {
+  sources = [ "$assimp_root/code/MakeVerboseFormat.cpp" ]
+}
+
+#
+# Exporter
+#
+
+assimp_source_set("assimp_exporter") {
+  sources = [
+    "$assimp_root/code/Exporter.cpp",
+    "$assimp_root/code/AssimpCExport.cpp",
+    "$assimp_root/code/StepExporter.cpp",
+  ]
+  configs_add = [ "config:no_unused_parameter" ]
+  deps = [
+    ":assimp_make_verbose_format",
+    ":assimp_postprocessing",
+  ]
+}
+
+#
+# Core
+#
+
+assimp_source_set("assimp_core_with_warnings_suppressed") {
+  sources = [
+    "$assimp_root/code/SpatialSort.cpp",
+    "$assimp_root/code/ProcessHelper.cpp",
+    "$assimp_root/code/DefaultLogger.cpp",
+    "$assimp_root/code/Importer.cpp",
+    "$assimp_root/code/BaseImporter.cpp",
+  ]
+  configs_add = [
+    "config:no_unused_parameter",
+    "config:no_misleading_indentation",
+    "config:no_tautological_compare",
+  ]
+  configs_del = [ "//src/gn/config:strict-overflow" ]
+}
+
+assimp_target("assimp") {
+  assimp_target_type = "static_library"
+  sources = [
+    "$assimp_root/code/Assimp.cpp",
+    "$assimp_root/code/BaseProcess.cpp",
+    "$assimp_root/code/PostStepRegistry.cpp",
+    "$assimp_root/code/ImporterRegistry.cpp",
+    "$assimp_root/code/DefaultIOStream.cpp",
+    "$assimp_root/code/DefaultIOSystem.cpp",
+    "$assimp_root/code/CInterfaceIOWrapper.cpp",
+    "$assimp_root/code/SGSpatialSort.cpp",
+    "$assimp_root/code/SceneCombiner.cpp",
+    "$assimp_root/code/ScenePreprocessor.cpp",
+    "$assimp_root/code/scene.cpp",
+    "$assimp_root/code/Bitmap.cpp",
+    "$assimp_root/code/Version.cpp",
+
+    "$assimp_root/code/MaterialSystem.cpp",
+  ]
+  public_configs = [ ":assimp_config" ]
+  configs_add = [ "config:no_class_memaccess" ]
+  deps = [
+    ":assimp_core_with_warnings_suppressed",
+    ":assimp_importer",
+  ]
+
+  if (use_assimp_processing) {
+    deps += [ ":assimp_postprocessing" ]
+  }
+  if (use_assimp_exporter) {
+    deps += [ ":assimp_exporter" ]
+  }
+  deps += [ "../skia/zlib" ]
+}

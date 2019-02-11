@@ -1,0 +1,118 @@
+# Copyright (c) 2017-2018 the Volcano Authors. Licensed under GPLv3.
+# androidExecutable is set to "executable" in a normal compile, that is,
+# the code is being built for the host. When a cross compile is detected,
+# androidExecutable is set to "shared_library" (for use by build-android.py).
+#
+# Note: the "executable" rule uses output_name = target_name,
+# but the "shared_library" rule always prefixes the output_name with "lib".
+# https://chromium.googlesource.com/chromium/src/tools/gn/+/HEAD/docs/reference.md#output_name
+#
+# For an example of how to use this template, see
+# https://github.com/ndsol/VolcanoSamples/04android/
+import("//src/gn/toolchain/android/settings.gni")
+import("//src/gn/toolchain/toolchain.gni")
+
+declare_args() {
+  android_variants = [
+    "arm",
+    "arm64",
+    "mipsel",
+    "mips64el",
+    "x86",
+    #"x64", Being tracked at https://github.com/ndsol/volcano/issues/11.
+  ]
+  android_clang = android_ndk_major_version >= 17
+}
+
+assert(android_clang || android_ndk_major_version < 17,
+       "Android NDK r18 will drop GCC entirely. Please set android_clang = true.")
+
+template("androidExecutable") {
+  if (current_os == host_os) {
+    # For desktop apps, androidExecutable just builds a vanilla executable.
+    executable(target_name) {
+      forward_variables_from(invoker, "*")
+      if (defined(configs_add)) {
+        configs += configs_add
+      }
+      if (defined(configs_del)) {
+        configs -= configs_del
+      }
+    }
+
+    if (defined(android_ndk_root)) {
+      libname = target_name
+
+      # TODO: build-posix.sh does more work after this is done.
+      # Instead, make this group("libs_$target_name") and
+      # action(target_name) {
+      #   deps = [ ":libs_$target_name" ]
+      #   script = "something that does the build-posix.sh"
+      # }
+      group("droid-all-variants-$target_name") {
+        deps = []
+        foreach(variant, android_variants) {
+          # See android_gcc_toolchains_helper in //src/gn/toolchain/android/BUILD.gn
+          # which defines android_$target_name and android_clang_$target_name.
+          if (android_clang) {
+            toolos = "android_clang_"
+          } else {
+            toolos = "android_"
+          }
+          target_toolchain = "//src/gn/toolchain/android:$toolos$variant"
+          deps += [
+            ":droid-lib$libname(${target_toolchain})"
+          ]
+        }
+      }
+    }
+  } else if (defined(android_ndk_root)) {
+    # Cross-compile a shared_library foreach variant. This is not a final APK.
+    shared_library("droid-lib$target_name") {
+      forward_variables_from(invoker, "*")
+      if (defined(configs_add)) {
+        configs += configs_add
+      }
+      if (defined(configs_del)) {
+        configs -= configs_del
+      }
+      output_dir = "$root_build_dir/$android_variants_dir/$android_app_abi"
+      output_name = target_name
+      output_extension = "so" # otherwise mac output would have ".dylib"
+    }
+  }
+}
+
+template("androidResource") {
+  if (current_os == host_os && !is_cross_host) {
+    copy(target_name) {
+      forward_variables_from(invoker, "*")
+
+      # For desktop apps, androidResource installs the data in a "res" dir
+      # relative to the executable's current location. See std::string resDir
+      # in volcanosamples/src/assimpglue.cpp.
+      outputs = [ "$root_build_dir/res/{{source_file_part}}" ]
+    }
+
+    copy("droid-copy-$target_name") {
+      forward_variables_from(invoker, "*")
+
+      # Android has this special 'res' dir, though this is not the final APK,
+      # files in this dir will be collected in the final APK.
+      outputs = [ "$target_gen_dir/raw_asset/{{source_file_part}}" ]
+    }
+  } else {
+    # "Phony" target to force the use of $host_toolchain_not_cross_host.
+    group(target_name) {
+      # Silence "sources was unused before it went out of scope."
+      if (defined(invoker.sources)) {
+        unused_sources = invoker.sources
+        unused_sources = []
+      }
+      deps = [ ":droid-copy-" + target_name + "($host_toolchain_not_cross_host)" ]
+      if (defined(invoker.deps)) {
+        deps += invoker.deps
+      }
+    }
+  }
+}

@@ -1,0 +1,54 @@
+# Copyright (c) 2017 the Volcano Authors. Licensed under GPLv3.
+
+import("//src/gn/vendor/glslangValidator.gni")
+
+glslangVulkanToHeader("shaders") {
+  copy_header = "../src/tools:copyHeader($host_toolchain)"
+  sources = [
+    "basic_test.vert",
+    "basic_test.frag",
+  ]
+}
+
+executable("basic_test") {
+  testonly = true
+
+  sources = [
+    "basic_test.cpp",
+  ]
+  configs += [ "//src/gn/config:optimize_debug" ]
+
+  deps = [
+    ":shaders",
+    "..:volcano",
+    "//src/gn/vendor/glfw",
+    "//src/gn/vendor/spirv_cross",
+    "//src/gn/vendor/glm",
+    "//src/gn/vendor/skia",
+    "//src/gn/vendor/skia:skiaglue",
+  ]
+  if (is_win) {
+    # Windows has the notion of "console" and "windowed" apps.
+    configs += [ "//src/gn/config/win:windowed" ]
+  }
+}
+
+executable("gtest") {
+  testonly = true
+
+  sources = [
+    "language_test.cpp"
+  ]
+  deps = [
+    "..:volcano",
+    "//src/gn/vendor/googletest",
+  ]
+}
+
+group("test") {
+  testonly = true
+  deps = [
+    ":basic_test",
+    ":gtest",
+  ]
+}

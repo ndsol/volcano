@@ -1,0 +1,163 @@
+# Copyright 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+import("//src/gn/vendor/subgnDefines.gni")
+
+glfw = rebase_path(volcano_prefix + "vendor/glfw", ".",
+                   rebase_path(target_out_dir, root_build_dir)) + "/"
+
+config("glfw_config") {
+  if (is_android) {
+    defines = [ "_GLFW_ANDROID" ]
+  } else if (is_mac || is_ios || is_tvos) {
+    defines = [
+      "_GLFW_COCOA",
+      "_GLFW_USE_RETINA",
+    ]
+  } else if (is_win) {
+    defines = [ "_GLFW_WIN32" ]
+  } else if (is_linux) {
+    if (is_xlib_enabled || is_xcb_enabled) {
+      defines = [ "_GLFW_X11" ]
+    } else if (is_wayland_enabled) {
+      defines = [ "_GLFW_WAYLAND" ]
+    } else {
+      # Technically is_xlib_enabled and is_xcb_enabled do not conflict with each other.
+      assert(false, "is_xlib_enabled, is_xcb_enabled, or is_wayland_enabled - pick one")
+    }
+  }
+  include_dirs = [
+    glfw + "include",
+    glfw + "deps",
+  ]
+}
+
+config("glfw_local_config") {
+  if (!is_win) {
+    cflags = [
+      "-Wno-sign-compare",
+      "-Wno-unused-parameter",
+      "-Wno-missing-field-initializers",
+    ]
+    if (is_mac || is_ios || is_tvos) {
+      # Add -fno-common to work around a bug in Apple's GCC
+      cflags += [ "-fno-common" ]
+    }
+  }
+}
+
+source_set("glfw") {
+  deps = [ "../vulkan:vulkan-headers" ]
+
+  defines = [
+    "_GLFW_BUILD_DLL",
+    "_GLFW_VULKAN_STATIC",
+    "__GLFW_USE_HYBRID_HPG",
+  ]
+
+  sources = [
+    glfw + "src/context.c",
+    glfw + "src/init.c",
+    glfw + "src/input.c",
+    glfw + "src/monitor.c",
+    glfw + "src/vulkan.c",
+    glfw + "src/window.c",
+  ]
+  if (!is_win) {
+    sources += [ glfw + "src/posix_thread.c" ]
+  }
+  if (!is_android) {
+    sources += [
+      glfw + "src/egl_context.c",
+      glfw + "src/osmesa_context.c",
+      glfw + "deps/glad.c",
+      glfw + "deps/getopt.c",
+    ]
+  }
+
+  if (is_android) {
+    sources += [
+      glfw + "src/android.c",
+      glfw + "src/android_input.c",
+      glfw + "src/android_jni.c",
+      glfw + "src/android_keyevent.c",
+      glfw + "src/android_main.c",
+      glfw + "src/android_null.c",
+      glfw + "src/posix_time.c",
+    ]
+    libs = [
+      "android",
+      "log",
+    ]
+    deps += [ "../vulkan" ]
+    public_deps = [ "../vulkan:android_native_app_glue" ]
+  } else if (is_mac || is_ios || is_tvos) {
+    libs = [
+      "Cocoa.framework",
+      "CoreFoundation.framework",
+      "CoreVideo.framework",
+      "IOKit.framework",
+      "Metal.framework",
+      "QuartzCore.framework",
+      "c++",
+    ]
+
+    sources += [
+      glfw + "src/cocoa_init.m",
+      glfw + "src/cocoa_joystick.m",
+      glfw + "src/cocoa_monitor.m",
+      glfw + "src/cocoa_window.m",
+      glfw + "src/cocoa_time.c",
+      glfw + "src/nsgl_context.m",
+    ]
+  } else if (is_posix) {
+    defines += [
+      # TODO: if is_linux and linux 3.17 or higher and glibc 2.27 or higher
+      # (possibly some backports, how to test this?) then Wayland performance
+      # is improved (avoids setup of a SIGBUS handler):
+      #"HAVE_MEMFD_CREATE",
+    ]
+
+    libs = [
+      "dl",
+      "X11",
+      "Xinerama",
+      "Xcursor",
+      "Xrandr",
+    ]
+
+    sources += [
+      glfw + "src/x11_init.c",
+      glfw + "src/x11_monitor.c",
+      glfw + "src/x11_window.c",
+      glfw + "src/xkb_unicode.c",
+      glfw + "src/posix_time.c",
+      glfw + "src/glx_context.c",
+    ]
+    if (is_linux) {
+      sources += [ glfw + "src/linux_joystick.c" ]
+    } else {
+      # TODO: FreeBSD joystick
+      sources += [ glfw + "src/null_joystick.c" ]
+    }
+  } else if (is_win) {
+    libs = [
+      "gdi32.lib",
+      "user32.lib",
+      "opengl32.lib",
+      "shell32.lib",
+    ]
+
+    sources += [
+      glfw + "src/win32_init.c",
+      glfw + "src/win32_joystick.c",
+      glfw + "src/win32_monitor.c",
+      glfw + "src/win32_time.c",
+      glfw + "src/win32_thread.c",
+      glfw + "src/win32_window.c",
+      glfw + "src/wgl_context.c",
+    ]
+  }
+
+  configs += [ ":glfw_local_config" ]
+  all_dependent_configs = [ ":glfw_config" ]
+}
