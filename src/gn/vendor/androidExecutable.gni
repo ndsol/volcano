@@ -1,0 +1,148 @@
+# Copyright (c) 2017-2018 the Volcano Authors. Licensed under GPLv3.
+# androidExecutable is set to "executable" in a normal compile, that is,
+# the code is being built for the host. When a cross compile is detected,
+# androidExecutable is set to "shared_library" (for use by build-android.py).
+#
+# Note: the "executable" rule uses output_name = target_name,
+# but the "shared_library" rule always prefixes the output_name with "lib".
+# https://chromium.googlesource.com/chromium/src/tools/gn/+/HEAD/docs/reference.md#output_name
+#
+# For an example of how to use this template, see
+# https://github.com/ndsol/VolcanoSamples/04android/
+import("//src/gn/toolchain/android/settings.gni")
+import("//src/gn/toolchain/toolchain.gni")
+import("subgnDefines.gni")
+
+# TODO: move this to src/gn/toolchain/toolchain.gni
+declare_args() {
+  android_variants = [
+    #"arm", breaks in vulkanmemoryallocator
+    "arm64",
+    #"x86", breaks in vulkanmemoryallocator
+    "x64",
+  ]
+  android_clang = android_ndk_major_version >= 17
+}
+
+assert(android_clang || android_ndk_major_version < 17,
+       "Android NDK r18 will drop GCC entirely. Please set android_clang = true.")
+
+template("androidExecutable") {
+  astudio_dir = "$target_gen_dir/app/build/intermediates/cmake/debug/obj"
+  if (current_os == host_os) {
+    # For desktop apps, androidExecutable just builds a vanilla executable.
+    executable(target_name) {
+      forward_variables_from(invoker, "*")
+      if (defined(configs_add)) {
+        configs += configs_add
+      }
+      if (defined(configs_del)) {
+        configs -= configs_del
+      }
+    }
+
+    if (defined(android_ndk_root)) {
+      # Build the final android APK bundle, with current_os == host_os
+      # This depends on each of the target architectures so they get
+      # built in parallel, with the final bundle step done on the host.
+      libname = target_name
+      copy_deps = []
+      tod = []
+      bundle_inputs = []
+      foreach(variant, android_variants) {
+        # This duplicates android_gcc_toolchains_helper in
+        # //src/gn/toolchain/android/BUILD.gn which defines
+        # android_$target_name and android_clang_$target_name.
+        if (android_clang) {
+          toolos = "android_clang_"
+        } else {
+          toolos = "android_"
+        }
+        target_toolchain = "//src/gn/toolchain/android:$toolos$variant"
+
+        if (variant == "x86") {
+          abi = "x86"
+        } else if (variant == "arm") {
+          assert(arm_version >= 7,
+                  "sync this with //src/gn/toolchain/android/settings.gni")
+          abi = "armeabi-v7a"
+        } else if (variant == "x64") {
+          abi = "x86_64"
+        } else if (variant == "arm64") {
+          abi = "arm64-v8a"
+        } else {
+          assert(false, "Unknown Android ABI: $variant")
+        }
+        tod += [ "--toolosdir", "$toolos$variant" ]
+        so_with_add = "$toolos$variant/" + rebase_path(
+            "$astudio_dir/$abi/lib$libname.so",
+            root_build_dir)
+
+        # Define a copy_op to copy arch-specific binaries from:
+        # android_clang_arm64/gen/$libname/
+        #      app/build/intermediates/cmake/debug/obj/
+        #      arm64-v8a/lib$libname.so
+        #
+        # to:
+        # gen/$libname/native/lib/arm64-v8a/lib$libname.so
+        #
+        # (substituting architectures and whether to use _clang_ or not)
+        # NOTE: The first location is $so_with_add, meaning there are
+        #       add-to-android-manifest.txt and lib$libname.add.txt files
+        #       in that directory for //src/gn/toolchain/android/bundle.py.
+        copy_op = "android-$variant-lib$target_name"
+        copy_deps += [ ":$copy_op" ]
+        copy(copy_op) {
+          deps = [ ":android-obj$libname(${target_toolchain})" ]
+          sources = [ "$root_build_dir/$so_with_add" ]
+          outputs = [ "$target_gen_dir/native/lib/$abi/lib$libname.so" ]
+        }
+        bundle_inputs += [ so_with_add ]
+      }
+
+      action("android-$target_name") {
+        # deps ensure all $libname are built
+        deps = copy_deps
+        outputfile = "$root_build_dir/$libname.apk"
+        outputs = [ outputfile ]
+        script = "//src/gn/toolchain/android/bundle.py"
+        args = [
+          "--target", libname,
+          "--out", rebase_path(outputfile, root_build_dir),
+          "--gen", rebase_path(target_gen_dir, root_build_dir),
+          "--sdk", android_sdk,
+          "--buildtools", android_sdk_build_tools_version,
+          "--keystore", android_keystore_file,
+        ]
+        if (android_use_old_aapt) {
+          args += [ "--use_old_aapt" ]
+        }
+        if (is_debug) {
+          args += [ "--debug" ]
+        }
+        args += [
+          "--minsdk",
+              "" + android_sdk_version, # convert int to string
+          "--latestsdk",
+              "" + android_latest_sdk, # convert int to string
+        ] + tod + bundle_inputs
+        pool = "//src/gn/toolchain:console($default_toolchain)"
+      }
+    }
+  } else if (defined(android_ndk_root)) {
+    # Cross-compile a shared_library foreach variant. This is not a final APK.
+    shared_library("android-obj$target_name") {
+      forward_variables_from(invoker, "*")
+      if (defined(configs_add)) {
+        configs += configs_add
+      }
+      if (defined(configs_del)) {
+        configs -= configs_del
+      }
+      output_dir = "$astudio_dir/$android_app_abi"
+      output_name = target_name
+      output_extension = "so" # otherwise mac output would have ".dylib"
+    }
+  }
+  astudio_dir = []
+}

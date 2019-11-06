@@ -1,0 +1,15 @@
+# Copyright 2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+
+import("//src/gn/vendor/subgnDefines.gni")
+
+config("glm_config") {
+  if (!is_win) {
+    cflags = [ "-Wno-undefined-reinterpret-cast" ]
+  }
+  include_dirs = [ volcano_prefix + "vendor/gli/external" ]
+}
+
+group("glm") {
+  public_configs = [ ":glm_config" ]
+}

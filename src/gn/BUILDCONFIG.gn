@@ -1,0 +1,222 @@
+# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright (c) 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPLv3.
+#
+# This file defines which toolchain and which configs are applied for each
+# type of rule (called a "target", e.g. "shared_library" or "executable").
+
+if (target_os == "") {
+  target_os = host_os
+}
+
+if (target_cpu == "") {
+  target_cpu = host_cpu
+}
+
+if (current_cpu == "") {
+  current_cpu = target_cpu
+}
+if (current_os == "") {
+  current_os = target_os
+}
+
+declare_args() {
+  # Extra level of optimization above release builds, which are above debug.
+  is_official_build = false
+
+  # Turn this on if you use the Clang compiler.
+  is_clang = host_os == "mac"
+
+  # Customize the compiler and toolchain.
+  custom_toolchain = ""
+
+  # This should not normally be set as a build argument.  It's here so that
+  # every toolchain can pass through the "global" value via toolchain_args().
+  host_toolchain = ""
+}
+
+declare_args() {
+  # Can be overridden with "gn gen --args=is_debug=false" for a release build.
+  is_debug = !is_official_build
+}
+
+assert(!(is_debug && is_official_build), "Can't do official debug builds")
+
+if (host_toolchain == "") {
+  # This selection logic works like Chromium's build system.
+  # Note: the "host_" prefix is needed to switch the target_args.current_cpu and
+  # current_os to host_cpu and host_os.
+  if (host_os == "mac") {
+    host_toolchain = "//src/gn/toolchain/mac:host_clang_$host_cpu"
+  } else if (host_os == "win") {
+    # Cross compiles do not work on win. toolchain never has "host_" prefix.
+    if (is_clang) {
+      host_toolchain = "//src/gn/toolchain/win:clang_$target_cpu"
+    } else {
+      host_toolchain = "//src/gn/toolchain/win:$target_cpu"
+    }
+  } else {
+    host_toolchain = "//src/gn/toolchain/posix:host_$host_cpu"
+  }
+}
+
+_default_toolchain = ""
+
+if (target_os == "android" || current_os == "android") {
+  if (is_clang) {
+    _default_toolchain = "//src/gn/toolchain/android:android_clang_$target_cpu"
+  } else {
+    _default_toolchain = "//src/gn/toolchain/android:android_$target_cpu"
+  }
+} else if (target_os == "ios") {
+  _default_toolchain = "//src/gn/toolchain/mac:ios_clang_$target_cpu"
+} else if (target_os == "mac") {
+  # On Mac we use the same toolchain for host and target by default.
+  assert(target_os == host_os, "Mac cross-compiles only work on mac hosts.")
+  assert(is_clang, "Mac gcc is not supported, but is_clang = false")
+  _default_toolchain = "//src/gn/toolchain/mac:clang_$target_cpu"
+} else if (target_os == "win") {
+  # On Windows we use the same toolchain for host and target by default.
+  assert(target_os == host_os, "Win cross-compiles only work on win hosts.")
+  if (is_clang) {
+    _default_toolchain = "//src/gn/toolchain/win:clang_$target_cpu"
+  } else {
+    _default_toolchain = "//src/gn/toolchain/win:$target_cpu"
+  }
+} else if (target_os == "winrt_81" || target_os == "winrt_81_phone" ||
+           target_os == "winrt_10") {
+  _default_toolchain = "//src/gn/toolchain/win:winrt_$target_cpu"
+} else {
+  if (is_clang) {
+    _default_toolchain = "//src/gn/toolchain/posix:clang_$target_cpu"
+  } else {
+    _default_toolchain = "//src/gn/toolchain/posix:$target_cpu"
+  }
+}
+
+if (custom_toolchain != "") {
+  set_default_toolchain(custom_toolchain)
+} else if (_default_toolchain != "") {
+  set_default_toolchain(_default_toolchain)
+}
+
+is_android = current_os == "android"
+is_fuchsia = current_os == "fuchsia"
+is_ios = current_os == "ios" || current_os == "tvos"
+is_tvos = current_os == "tvos"
+is_linux = current_os == "linux"
+is_freebsd = current_os == "freebsd"
+is_mac = current_os == "mac"
+is_win = (current_os == "win" || current_os == "winrt_81" ||
+    current_os == "winrt_81_phone" || current_os == "winrt_10")
+
+is_posix = is_mac || is_linux || is_freebsd || is_android
+
+default_compiler_configs = [
+  "//src/gn/config:extra_flags",
+  "//src/gn/config:afdo",
+  "//src/gn/config:compiler",
+  "//src/gn/config:pthread",
+  "//src/gn/config:stackrealign",
+  "//src/gn/config:compiler_arm_fpu",
+  "//src/gn/config:compiler_arm_thumb",
+  "//src/gn/config:default_optimization",
+  "//src/gn/config:default_stack_frames",
+  "//src/gn/config:default_symbols",
+  "//src/gn/config:c++11",
+  "//src/gn/config:rtti",
+  "//src/gn/config:no_exceptions",
+  "//src/gn/config:runtime_library",
+  "//src/gn/config:symbol_visibility_hidden",
+  "//src/gn/config:wextra",
+  "//src/gn/config:strict-overflow",
+  "//src/gn/config:no-undefined-in-obj"
+]
+if (is_win) {
+  default_compiler_configs += [
+    "//src/gn/config/win:default_crt",
+    "//src/gn/config/win:lean_and_mean",
+    "//src/gn/config/win:winver",
+    "//src/gn/config/win:vs_code_analysis",
+  ]
+}
+if (current_os == "winrt_81" || current_os == "winrt_81_phone" ||
+    current_os == "winrt_10") {
+  default_compiler_configs += [ "//src/gn/config/win:target_winrt" ]
+}
+
+if (is_android) {
+  default_compiler_configs +=
+      [ "//src/gn/config/android:default_cygprofile_instrumentation" ]
+}
+if (is_linux && !is_android) {
+  declare_args() {
+    is_wayland_enabled = false
+  }
+  declare_args() {
+    is_xcb_enabled = !is_wayland_enabled
+    is_xlib_enabled = !is_wayland_enabled
+  }
+  assert((is_xcb_enabled || is_xlib_enabled) && !is_wayland_enabled,
+         "Wayland builds cannot be XCB or XLIB at the same time")
+  assert(is_wayland_enabled || is_xcb_enabled || is_xlib_enabled,
+         "is_xcb_enabled and is_xlib_enabled should not be explicitly disabled. Just set is_wayland_enabled = true.")
+}
+
+# Debug/release-related defines.
+if (is_debug) {
+  default_compiler_configs += [ "//src/gn/config:debug" ]
+} else {
+  default_compiler_configs += [ "//src/gn/config:release" ]
+}
+
+# Static libraries and source sets use only the compiler ones.
+set_defaults("static_library") {
+  configs = default_compiler_configs
+}
+set_defaults("source_set") {
+  configs = default_compiler_configs
+}
+
+# Compute the set of configs common to all linked targets (shared libraries,
+# loadable modules, executables) to avoid duplication below.
+if (is_win) {
+  # Windows linker setup for EXEs and DLLs.
+  # Many targets remove these configs, so they are not contained within
+  # //src/gn/config:executable_config for easy removal.
+  _linker_configs = [
+    "//src/gn/config/win:sdk_link",
+    "//src/gn/config/win:common_linker_setup",
+    # Because /INCREMENTAL conflicts with /OPT:REF, let targets opt into this
+    # instead of it just spamming the build with errors.
+    #"//src/gn/config/win:default_incremental_linking",
+  ]
+} else if (is_mac || is_ios) {
+  _linker_configs = [ "//src/gn/config/mac:strip_all" ]
+} else {
+  _linker_configs = []
+}
+
+# Executable defaults.
+default_executable_configs = default_compiler_configs + [
+                               "//src/gn/config:default_libs",
+                               "//src/gn/config:executable_config",
+                             ] + _linker_configs
+set_defaults("executable") {
+  configs = default_executable_configs
+}
+
+# Shared library and loadable module defaults (also for components in component
+# mode).
+default_shared_library_configs = default_compiler_configs + [
+                                   "//src/gn/config:default_libs",
+                                   "//src/gn/config:shared_library_config",
+                                 ] + _linker_configs
+
+set_defaults("shared_library") {
+  configs = default_shared_library_configs
+}
+
+set_defaults("loadable_module") {
+  configs = default_shared_library_configs
+}

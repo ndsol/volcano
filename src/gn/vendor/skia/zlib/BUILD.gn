@@ -1,0 +1,70 @@
+# Copyright 2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+#
+# On posix platforms, use system zlib. Win does not ship zlib
+# in a well-known place, so use the one built as part of skia.
+
+import("//src/gn/vendor/subgnDefines.gni")
+
+config("zlib_config") {
+  if (is_win || is_android) {
+    # Win does not ship zlib in a well-known place, so use skia.
+    # Android does not ship a consistent version (zlib version may be very old)
+    include_dirs = [ volcano_prefix + "vendor/skia/third_party/externals/zlib" ]
+  }
+}
+
+# this is a source_set deliberately to not add anything to the build
+# process except libs and configs
+source_set("zlib") {
+  if (is_win || is_android) {
+    all_dependent_configs = [
+      ":zlib_config"
+    ]
+    if (is_win) {
+      libname = "zlib.lib"
+    } else {
+      libname = "libzlib.a"
+    }
+    libs = [ "$root_build_dir/$skiasubdir/$libname" ]
+  } else {
+    libs = [ "z" ]
+  }
+  sources = []
+}
+
+miniz_prefix = volcano_prefix + "vendor/skia/third_party/externals/zlib/contrib"
+
+config("miniz_private_config") {
+  defines = [
+    "HAS_STDINT_H",
+    "MAXU32=UINT32_MAX",
+  ]
+  if (is_win) {
+  } else {
+    cflags = [
+      "-Wno-unused-parameter",
+    ]
+    if (!is_clang) {
+      cflags += [ "-Wno-misleading-indentation" ]
+    }
+  }
+}
+
+config("miniz_config") {
+  include_dirs = [ miniz_prefix ]
+}
+
+source_set("miniz") {
+  deps = [ ":zlib" ]
+  configs += [
+    ":miniz_private_config",
+    ":zlib_config",
+  ]
+  public_configs = [ ":miniz_config" ]
+  sources = [
+    miniz_prefix + "/minizip/ioapi.c",
+    miniz_prefix + "/minizip/zip.c",
+    miniz_prefix + "/minizip/unzip.c",
+  ]
+}

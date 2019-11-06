@@ -1,0 +1,558 @@
+# Copyright 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+import("//src/gn/toolchain/android/settings.gni")
+import("//src/gn/toolchain/win/settings.gni")
+import("//src/gn/toolchain/mac/mac_sdk.gni")
+import("../androidExecutable.gni")
+import("../subgnDefines.gni")
+import("../spirvDefines.gni")
+import("vulkan-args.gni")
+
+spirv_tools_dir = "$vulkloader/../skia/third_party/externals/spirv-tools"
+action("spirv_tools_commit_id.h") {
+  symbol_name = "SPIRV_TOOLS_COMMIT_ID"
+  if (!defined(vk_out_dir)) {
+    vk_out_dir = "$vk_gen_include_dir/vulkan"
+  }
+  outputs = [ "$vk_out_dir/$target_name" ]
+
+  script = "$vulklayers/scripts/external_revision_generator.py"
+  args = [
+    "--git_dir", rebase_path(spirv_tools_dir, root_build_dir),
+    "-s", symbol_name,
+    "-o", rebase_path(vk_out_dir, root_build_dir) + "/$target_name",
+  ]
+}
+
+source_set("spirv-tools") {
+  if (is_win) {
+    libspirv_tools = "spirv-tools.lib"
+  } else {
+    libspirv_tools = "libspirv-tools.a"
+  }
+  # FIXME: XXX: $root_build_dir implies that skia cannot be
+  # built for all targets (i.e. no cross-compiling for Android)
+  libs = [ "$root_build_dir/$skiasubdir/$libspirv_tools" ]
+}
+
+# This private source_set makes sure skia_run_subninja is only called once,
+# even though multiple targets depend on spirv-tools (inside skia).
+# If it is depended on multiple times, subgn adds skia multiple times (BUG).
+source_set("_spirv_tools_and_run_subninja") {
+  deps = [
+    ":spirv-tools",
+    "../skia:skia_run_subninja",
+  ]
+}
+
+action("autostype.h") {
+  output_filename = "$vk_gen_include_dir/vulkan/autostype.h"
+  outputs = [ output_filename ]
+  reg = "$vulkheader/registry/vk.xml"
+  script = "//src/gn/vendor/vulkan/volcano-header.py"
+  inputs = [ reg, script ]
+  args = [
+    "-registry", rebase_path(reg),
+    rebase_path(output_filename),
+  ]
+}
+
+copy("vulkan-headers") {
+  # this target is only needed for downstream BUILD.gn files that expect
+  # the vulkan SDK to be deployed with headers and libs in the same dir
+  # (in particular, skia has only skia_vulkan_sdk)
+  sources = [
+    "$vulkheader/include/vulkan/vk_icd.h",
+    "$vulkheader/include/vulkan/vk_layer.h",
+    "$vulkheader/include/vulkan/vk_platform.h",
+    "$vulkheader/include/vulkan/vk_sdk_platform.h",
+    "$vulkheader/include/vulkan/vulkan.h",
+    "$vulkheader/include/vulkan/vulkan.hpp",
+    "$vulkheader/include/vulkan/vulkan_android.h",
+    "$vulkheader/include/vulkan/vulkan_core.h",
+    "$vulkheader/include/vulkan/vulkan_fuchsia.h",
+    "$vulkheader/include/vulkan/vulkan_ggp.h",
+    "$vulkheader/include/vulkan/vulkan_ios.h",
+    "$vulkheader/include/vulkan/vulkan_macos.h",
+    "$vulkheader/include/vulkan/vulkan_metal.h",
+    "$vulkheader/include/vulkan/vulkan_vi.h",
+    "$vulkheader/include/vulkan/vulkan_wayland.h",
+    "$vulkheader/include/vulkan/vulkan_win32.h",
+    "$vulkheader/include/vulkan/vulkan_xcb.h",
+    "$vulkheader/include/vulkan/vulkan_xlib.h",
+    "$vulkheader/include/vulkan/vulkan_xlib_xrandr.h",
+  ]
+  deps = [ ":autostype.h" ]
+  outputs = [ "$vk_gen_include_dir/vulkan/{{source_file_part}}" ]
+  if (is_win && !use_dynamic_crt) {
+    all_dependent_configs = [ "config:vulkan_import_lib" ]
+  }
+}
+
+
+
+# Android support. See
+# https://android.googlesource.com/platform/frameworks/native/+/master/vulkan
+if (is_android) {
+
+  # android_native_app_glue comes from the Android SDK.
+  # https://github.com/ndsol/glfwplusandroid extends it, so it is found in GLFW
+  source_set("vulkan-android-wrapper") {
+    sources = [
+      android_ndk_root +
+        "/sources/third_party/vulkan/src/common/vulkan_wrapper.cpp",
+    ]
+    public_configs = [ "config:vulkan_config" ]
+    deps = [ ":vulkan-headers" ]
+  }
+
+  # ":vulkan" group concisely lists what is going to be built.
+  group("vulkan") {
+    public_deps = [
+      ":vulkan-android-wrapper",
+    ]
+  }
+
+} else {
+
+
+
+#
+# Non-Android (desktop app) support.
+#
+
+# Prevent accidentally building vulkan-1.dll code into the app itself,
+# which would make for some difficult-to-debug code duplication.
+if (is_win && !use_dynamic_crt) {
+  group("vulkan") {
+    public_configs = [
+      "config:vulkan_config",
+      # -DNOMINMAX prevents <windows.h> from defining 'min' and 'max' macros.
+      "//src/gn/config/win:nominmax",
+    ]
+    public_deps = [
+      ":vulkan-headers",
+    ]
+  }
+} else {
+  # Only build vulkan-1.dll or vulkan-1.so if !is_win or use_dynamic_crt.
+  # NOTE: if (is_mac) this adds a dep to :MoltenVK_group, below.
+  source_set("vulkan-loader") {
+    # CMake uses loader/loader_cmake_config.h.in. This emulates it.
+    # Another option: defines += VULKAN_NON_CMAKE_BUILD and HAVE_SECURE_GETENV
+    # but detecting glibc features is easier done by probing the glibc version.
+    cop = "(c) 2017-2018 the Volcano Authors. Licensed under the GPLv3."
+    write_file("$target_gen_dir/loader_cmake_config.h", [
+      "/** Copyright $cop",
+      " * THIS FILE IS AUTO-GENERATED. ALL EDITS WILL BE DISCARDED.",
+      " * Source file: src/gn/vendor/vulkan/BUILD.gn",
+      " */",
+      "#ifdef __GLIBC__",
+      "#if defined(__GLIBC_MINOR__) && (__GLIBC__>=2) && " +
+          "(__GLIBC_MINOR__>=17)",
+      "#define HAVE_SECURE_GETENV",
+      "#else /* glibc version 2.17 introduced secure_getenv */",
+      "/* glibc before 2.17 may or may not have __secure_getenv */",
+      "#define HAVE___SECURE_GETENV",
+      "#endif /* glibc version 2.17 introduced secure_getenv */",
+      "#else /*__GLIBC__*/",
+      "/* Assume secure_getenv is available */",
+      "#define HAVE_SECURE_GETENV",
+      "#endif /*__GLIBC__*/",
+    ])
+
+    deps = [ ":vulkan-headers" ]
+    include_dirs = [
+      "$vulkloader/loader",
+      "$vulkloader/loader/generated",
+      "$target_gen_dir",
+    ]
+    configs += [
+      "config:vulkan_private_config",
+      "config:vulkan_config",
+    ]
+    sources = [
+      "$vulkloader/loader/extension_manual.c",
+      "$vulkloader/loader/loader.c",
+      "$vulkloader/loader/trampoline.c",
+      "$vulkloader/loader/wsi.c",
+      "$vulkloader/loader/debug_utils.c",
+      "$vulkloader/loader/cJSON.c",
+      "$vulkloader/loader/murmurhash.c",
+
+      "$vulkloader/loader/dev_ext_trampoline.c",
+      "$vulkloader/loader/phys_dev_ext.c",
+      "$vulkloader/loader/unknown_ext_chain.c",
+    ]
+    if (is_win) {
+      sources += [ "$vulkloader/loader/dirent_on_windows.c" ]
+    } else {
+      libs = [
+        "pthread",
+        "m",
+      ]
+    }
+  }
+
+  shared_library("vulkan-library") {
+    if (is_linux) {
+      if (is_xcb_enabled) {
+        libs = [
+          "X11-xcb",
+          "xcb",
+        ]
+      }
+      if (is_xlib_enabled) {
+        # no libs needed
+      }
+      if (is_wayland_enabled) {
+        libs = [
+          "wayland-client",
+          "wayland-server",
+          "wayland-egl",
+          "wayland-cursor",
+        ]
+      }
+    }
+
+    deps = [ ":vulkan-loader" ]
+    public_configs = [ "config:vulkan_config" ]
+
+    if (is_win) {
+      output_name = "vulkan-" + vulkan_api_major
+      libs = [
+        "advapi32.lib",
+        "shlwapi.lib",
+        "Cfgmgr32.lib",
+      ]
+      sources = [
+        rebase_path("$vulkloader/loader/vulkan-$vulkan_api_major.def"),
+      ]
+      # Use the /MD and /MDd C Runtime.
+      configs += [ "//src/gn/config/win:dynamic_crt" ]
+    } else if (is_mac || is_ios || is_tvos) {
+      output_name = "vulkan." + vulkan_api_major
+      ldflags = [
+        # Set install name so that an executable can specify an -rpath
+        "-install_name", "@rpath/libvulkan." + vulkan_api_major + ".dylib",
+        "-Wl,-rpath,@loader_path/",
+      ]
+      deps += [ ":MoltenVK_group" ]
+    } else if (is_posix || is_linux || is_android) {
+      output_name = "vulkan"
+      output_extension = "so.$vulkan_api_major"
+    } else {
+      assert(false, "Unsupported OS")
+    }
+  }
+
+  # ":vulkan" group concisely lists what is going to be built.
+  group("vulkan") {
+    public_deps = [
+      ":vulkan-library",
+    ]
+    if (use_vulkan_layers) {
+      # data_deps means generate these files but do not link them to the app.
+      data_deps = [ ":vulkan-layers" ]
+    }
+  }
+} # if (is_win && !use_dynamic_crt)
+
+
+
+#
+# Validation Layers
+#
+
+# vk_layer("standard_validation") is a meta-layer with no source code in itself
+vk_layer("standard_validation") {}
+
+static_library("VkLayer_utils") {
+  deps = [ ":vulkan-headers" ]
+  configs += [
+    "config:private_config_include_dir_layers_generated",
+    "config:vulkan_private_config",
+    "config:vulkan_config",
+  ]
+  sources = [
+    "$vulklayers/layers/vk_layer_config.cpp",
+    "$vulklayers/layers/vk_layer_extension_utils.cpp",
+    "$vulklayers/layers/vk_layer_utils.cpp",
+    "$vulklayers/layers/vk_format_utils.cpp",
+  ]
+  output_dir = vulkan_install_dir + "/explicit_layer.d"
+}
+
+source_set("core_validation-silence-a-warning") {
+  deps = [
+    "../glslang:SPIRV",
+    "config:layer-configs",
+    ":vulkan-headers",
+  ]
+  defines = [ "BUILD_CORE_VALIDATION" ]
+  configs += [
+    "config:unused-function",
+    "config:sign-compare",
+    "config:include_spirv_tools_from_skia",
+  ]
+  sources = [
+    "$vulklayers/layers/buffer_validation.cpp",
+    "$vulklayers/layers/shader_validation.cpp",
+  ]
+}
+
+vk_layer("core_validation") {
+  deps = [
+    "../glslang:SPIRV",
+    ":spirv_tools_commit_id.h",
+    ":_spirv_tools_and_run_subninja",
+    ":core_validation-silence-a-warning",
+  ]
+  defines = [ "BUILD_CORE_VALIDATION" ]
+  public_configs = [ "config:include_spirv_tools_from_skia" ]
+  sources = [
+    "$vulklayers/layers/core_validation.cpp",
+    "$vulklayers/layers/drawdispatch.cpp",
+    "$vulklayers/layers/convert_to_renderpass2.cpp",
+    "$vulklayers/layers/descriptor_sets.cpp",
+    "$vulklayers/layers/gpu_validation.cpp",
+    "$vulklayers/layers/xxhash.c",
+    "$vulklayers/layers/generated/chassis.cpp",
+    "$vulklayers/layers/generated/layer_chassis_dispatch.cpp",
+  ]
+}
+
+vk_layer("object_lifetimes") {
+  defines = [ "BUILD_OBJECT_TRACKER" ]
+  sources = [
+    "$vulklayers/layers/object_tracker_utils.cpp",
+    "$vulklayers/layers/generated/object_tracker.cpp",
+    "$vulklayers/layers/generated/chassis.cpp",
+    "$vulklayers/layers/generated/layer_chassis_dispatch.cpp",
+  ]
+}
+
+vk_layer("thread_safety") {
+  #include_dirs = [ "$vulklayers/layers" ]
+  defines = [ "BUILD_THREAD_SAFETY" ]
+  sources = [
+    "$vulklayers/layers/generated/thread_safety.cpp",
+    "$vulklayers/layers/generated/chassis.cpp",
+    "$vulklayers/layers/generated/layer_chassis_dispatch.cpp",
+  ]
+}
+
+vk_layer("stateless_validation") {
+  defines = [ "BUILD_PARAMETER_VALIDATION" ]
+  configs_add = [
+    "config:format-nonliteral",
+    "config:maybe-uninitialized",
+  ]
+  sources = [
+    "$vulklayers/layers/parameter_validation_utils.cpp",
+    "$vulklayers/layers/generated/parameter_validation.cpp",
+    "$vulklayers/layers/generated/chassis.cpp",
+    "$vulklayers/layers/generated/layer_chassis_dispatch.cpp",
+  ]
+}
+
+vk_layer("unique_objects") {
+  defines = [ "LAYER_CHASSIS_CAN_WRAP_HANDLES" ]
+  sources = [
+    "$vulklayers/layers/generated/chassis.cpp",
+    "$vulklayers/layers/generated/layer_chassis_dispatch.cpp",
+  ]
+}
+
+# TODO: vk_layer("khronos_validation") builds all standard_validation layers
+#       into a single library
+
+group("vulkan-layers") {
+  deps = [
+    ":VkLayer_core_validation",
+    ":VkLayer_object_lifetimes",
+    ":VkLayer_thread_safety",
+    ":VkLayer_stateless_validation",
+    ":VkLayer_unique_objects",
+    ":VkLayer_standard_validation",
+  ]
+}
+
+
+
+#
+# MoltenVK
+#
+
+if (is_mac || is_ios) {
+  assert(mac_deployment_target != "10.9", "Min 10.11 required for Metal")
+  assert(mac_deployment_target != "10.10", "Min 10.11 required for Metal")
+
+  mvk_path = "$vulkloader/MoltenVK"
+  spirv_cross_dir = "$vulkloader/../spirv_cross"
+  mvk_shader_dir = "$mvk_path/MoltenVKShaderConverter"
+  config("moltenvk_private_config") {
+    include_dirs = [
+      "$mvk_path/MoltenVK/MoltenVK/API",
+      "$mvk_path/MoltenVK/MoltenVK/Commands",
+      "$mvk_path/MoltenVK/MoltenVK/Loader",
+      "$mvk_path/MoltenVK/MoltenVK/Layers",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects",
+      "$mvk_path/MoltenVK/MoltenVK/OS",
+      "$mvk_path/MoltenVK/MoltenVK/Utility",
+      "$mvk_path/MoltenVK/MoltenVK/Vulkan",
+      "$mvk_path/Common",
+      "$mvk_shader_dir",
+      "$mvk_shader_dir/Common",
+      "$mvk_shader_dir/MoltenVKSPIRVToMSLConverter",
+      "$spirv_cross_dir",
+      "$spirv_cross_dir/..",
+      "$vulkloader/../skia/third_party/externals/spirv-headers/include",
+    ]
+
+    cflags_cc = [
+      "-Wno-ignored-qualifiers",
+      "-Wno-missing-braces",
+      "-Wno-reorder",
+      "-Wno-sign-compare",
+      "-Wno-nonportable-include-path",
+      "-Wno-unguarded-availability-new",
+    ]
+    cflags_objcc = cflags_cc
+
+    defines = [
+      "MVK_LOG_LEVEL_ERROR=1",
+      "MVK_LOG_LEVEL_INFO=0",
+      "MVK_LOG_LEVEL_DEBUG=0",
+      "MVK_LOG_LEVEL_TRACE=0",
+    ]
+    if (moltenvk_debug) {
+      defines += [ "MVK_DEBUG=1" ]
+    } else {
+      defines += [ "MVK_DEBUG=0" ]
+    }
+    if (!use_spirv_cross_exceptions) {
+      defines += [ "SPIRV_CROSS_EXCEPTIONS_TO_ASSERTIONS" ]
+    }
+    defines += [ "SPIRV_CROSS_NAMESPACE_OVERRIDE=MVK_spirv_cross" ]
+  }
+
+  shared_library("MoltenVK") {
+    configs += [
+      ":moltenvk_private_config",
+      "config:cereal_config",
+      "config:vulkan_private_config",
+      "config:vulkan_config",
+      "config:include_spirv_tools_from_skia",
+    ]
+    deps = [
+      "../spirv_cross:spirv-cross-msl-MVK_spirv_cross",
+      "../spirv_cross:spirv-cross-reflect-MVK_spirv_cross",
+      ":spirv-tools",
+      ":vulkan-headers",
+      "../glslang:SPIRV",
+    ]
+
+    libs = [
+      "System",
+      "c++",
+    ]
+    ldflags = [
+      # Set install name so that an executable can specify an -rpath
+      "-install_name", "@rpath/libMoltenVK.dylib",
+      "-framework", "Cocoa",
+      "-framework", "Metal",
+      "-framework", "IOSurface",
+      "-framework", "IOKit",
+      "-framework", "QuartzCore",
+    ]
+
+    sources = [
+      "$mvk_path/Common/MVKOSExtensions.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCmdDebug.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCmdDispatch.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCmdPipeline.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCmdQueries.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCmdRenderPass.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCmdTransfer.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCommand.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCommandEncoderState.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCommandEncodingPool.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCommandPool.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKCommandResourceFactory.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Commands/MVKMTLBufferAllocation.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKBuffer.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKDescriptorSet.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKFramebuffer.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKInstance.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKQueryPool.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKRenderPass.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKResource.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKShaderModule.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKSurface.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKSwapchain.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKSync.mm",
+      "$mvk_path/MoltenVK/MoltenVK/GPUObjects/MVKVulkanAPIObject.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Layers/MVKExtensions.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Layers/MVKLayers.mm",
+      "$mvk_path/MoltenVK/MoltenVK/OS/CAMetalLayer+MoltenVK.m",
+      "$mvk_path/MoltenVK/MoltenVK/OS/MTLRenderPassDescriptor+MoltenVK.m",
+      "$mvk_path/MoltenVK/MoltenVK/OS/MTLRenderPipelineDescriptor+MoltenVK.m",
+      "$mvk_path/MoltenVK/MoltenVK/OS/MTLSamplerDescriptor+MoltenVK.m",
+      "$mvk_path/MoltenVK/MoltenVK/OS/MTLTextureDescriptor+MoltenVK.m",
+      "$mvk_path/MoltenVK/MoltenVK/OS/MVKGPUCapture.mm",
+      "$mvk_path/MoltenVK/MoltenVK/OS/NSString+MoltenVK.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Utility/MVKBaseObject.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Utility/MVKFoundation.cpp",
+      "$mvk_path/MoltenVK/MoltenVK/Utility/MVKWatermark.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Utility/MVKCodec.cpp",
+      "$mvk_path/MoltenVK/MoltenVK/Utility/MVKBlockObserver.m",
+      "$mvk_path/MoltenVK/MoltenVK/Vulkan/mvk_datatypes.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Vulkan/vk_mvk_moltenvk.mm",
+      "$mvk_path/MoltenVK/MoltenVK/Vulkan/vulkan.mm",
+
+      "$mvk_shader_dir/MoltenVKSPIRVToMSLConverter/FileSupport.mm",
+      "$mvk_shader_dir/MoltenVKSPIRVToMSLConverter/SPIRVConversion.mm",
+      "$mvk_shader_dir/MoltenVKSPIRVToMSLConverter/SPIRVToMSLConverter.cpp",
+      "$mvk_shader_dir/MoltenVKSPIRVToMSLConverter/SPIRVReflection.cpp",
+      "$mvk_shader_dir/MoltenVKGLSLToSPIRVConverter/GLSLToSPIRVConverter.cpp",
+      "$mvk_shader_dir/MoltenVKGLSLToSPIRVConverter/GLSLConversion.mm",
+      "$mvk_shader_dir/Common/SPIRVSupport.cpp",
+    ]
+  }
+
+  copy("MoltenVK_icd") {
+    # Use a patched icd.json from the same dir as this file.
+    json_file_name = "MoltenVK_icd.json"
+    sources = [ "$json_file_name" ]
+    outputs = [ vulkan_install_dir + "/icd.d/$json_file_name" ]
+  }
+
+  group("MoltenVK_group") {
+    deps = [
+      ":MoltenVK",
+      ":MoltenVK_icd",
+    ]
+  }
+}
+
+
+
+#
+# All of non-android (desktop app) support is wrapped in an if {} block.
+#
+} # if (is_android)
+#
+#
+#
+
+group("default") {
+  public_deps = [ ":vulkan" ]
+}

@@ -1,0 +1,13 @@
+# Copyright (c) 2017-2018 the Volcano Authors. Licensed under GPLv3.
+
+declare_args() {
+  subgn_path = "../../vendor/subgn"
+  volcano_prefix = "//vendor/volcano/"
+  skiasubdir = "skia$current_os$current_cpu"
+}
+
+declare_args() {
+  vulkheader = volcano_prefix + "vendor/vulkan-headers/"
+  vulkloader = volcano_prefix + "vendor/vulkan-loader/"
+  vulklayers = volcano_prefix + "vendor/vulkan-validationlayers/"
+}

@@ -1,0 +1,397 @@
+# Copyright (c) 2017-2018 the Volcano Authors. Licensed under GPLv3.
+import("../subgnDefines.gni") # for volcano_prefix
+import("//src/gn/toolchain/android/settings.gni")
+
+declare_args() {
+  # NOTE: Android AAudio does not use libao at all, just ao_glue.h
+  # Thus these only affect desktop builds.
+  libao_prefix = "//vendor/libao"
+  libao_use_system_libao = is_posix && !is_mac
+  libao_use_wmm = is_win
+  libao_use_alsa = is_posix && !is_mac
+  libao_use_sndio = is_posix
+  #libao_use_arts = is_posix && !is_mac
+  # FIXME: add ability for pkgconfig to be queried in a different way
+  # that can tell whether pulse is installed (without causing a fatal error).
+  libao_use_pulse = false
+}
+
+declare_args() {
+  libao_root = rebase_path(libao_prefix, ".",
+                           rebase_path(target_out_dir, root_build_dir))
+}
+
+# buildgn_path is the path to this BUILD.gn file
+buildgn_path = rebase_path("//src/gn/vendor/libao", ".",
+                           rebase_path(target_out_dir, root_build_dir))
+
+config("deprecated-declarations") {
+  if (!is_win) {
+    cflags = [ "-Wno-deprecated-declarations" ]
+  }
+}
+
+config("format") {
+  if (!is_win) {
+    cflags = [ "-Wno-format" ]
+  }
+}
+
+config("implicit-fallthrough") {
+  if (!is_win) {
+    cflags = [ "-Wno-implicit-fallthrough" ]
+  }
+}
+
+config("maybe-uninitialized") {
+  if (!is_win && !is_clang) {
+    cflags = [ "-Wno-maybe-uninitialized" ]
+  }
+}
+
+config("missing-field-initializers") {
+  if (!is_win) {
+    cflags = [ "-Wno-missing-field-initializers" ]
+  }
+}
+
+config("pointer-sign") {
+  if (!is_win) {
+    cflags = [ "-Wno-pointer-sign" ]
+  }
+}
+
+config("sign-compare") {
+  if (!is_win) {
+    cflags = [ "-Wno-sign-compare" ]
+  }
+}
+
+config("stringop-truncation") {
+  if (!is_win && !is_clang) {
+    cflags = [ "-Wno-stringop-truncation" ]
+  }
+}
+
+config("switch") {
+  if (!is_win) {
+    cflags = [ "-Wno-switch" ]
+  }
+}
+
+config("type-limits") {
+  if (!is_win) {
+    cflags = [ "-Wno-type-limits" ]
+  }
+}
+
+config("unused-function") {
+  if (!is_win) {
+    cflags = [ "-Wno-unused-function" ]
+  }
+}
+
+config("unused-parameter") {
+  if (!is_win) {
+    cflags = [ "-Wno-unused-parameter" ]
+  }
+}
+
+config("unused-variable") {
+  if (!is_win) {
+    cflags = [ "-Wno-unused-variable" ]
+  }
+}
+
+if (!is_android) {
+  assert(!libao_use_wmm || is_win,
+         "WMM is only available on Windows")
+  assert(!libao_use_alsa || (is_posix && !is_mac),
+         "ALSA is only available on Linux")
+  assert(!libao_use_sndio || is_posix,
+         "sndio is only available on a posix OS")
+  # aRts requires running artsc-config --cflags and arts-config --libs
+  # A python wrapper has not been implemented for that.
+  #assert(!libao_use_arts || (is_posix && !is_mac),
+  #       "aRts only available on non-mac platforms")
+
+  config("libao_config") {
+    write_file("$target_gen_dir/os_types.h", [
+      "#ifndef __OS_TYPES_H__",
+      "#define __OS_TYPES_H__",
+      "#include <stdint.h>",
+      "typedef uint8_t uint_8;",
+      "typedef uint16_t uint_16;",
+      "typedef uint32_t uint_32;",
+      "typedef int8_t sint_8;",
+      "typedef int16_t sint_16;",
+      "typedef int32_t sint_32;",
+      "#endif /* __OS_TYPES_H__ */",
+    ])
+    include_dirs = [
+      "$libao_root/include",
+      "$target_gen_dir",
+      "$buildgn_path",
+    ]
+  }
+
+  config("libao_config_ldflags") {
+    if (libao_use_system_libao) {
+      pkglibs = exec_script(
+          rebase_path(volcano_prefix + "/src/gn/vendor/pkgconfig.py", ".",
+                      rebase_path(target_out_dir, root_build_dir)),
+          [ "--libs", "ao" ], "trim string")
+      assert(pkglibs == "-lao", "Untested pkglibs=$pkglibs")
+      libs = [ "ao" ]
+    } else {
+      plugins = []
+      if (libao_use_alsa) {
+        plugins += [ "./libao-alsa.so" ]
+      }
+      if (libao_use_pulse) {
+        plugins += [ "./libao-pulse.so" ]
+      }
+
+      # Use state variables because there is no len() function.
+      add_prefix = true
+      add_suffix = false
+      not_needed([ "add_prefix", "add_suffix" ]) # in case len() == 0.
+      # Use a foreach instead of len().
+      foreach(f, plugins) {
+        if (!defined(ldflags)) {
+          ldflags = []
+        }
+        if (add_prefix) {
+          ldflags += [ "-Wl,--no-as-needed" ]
+          add_prefix = false
+        }
+        ldflags += [ f ]
+        add_suffix = true
+      }
+      if (add_suffix) {
+        ldflags += [ "-Wl,--as-needed" ]
+      }
+    }
+  }
+
+  config("libao_private_config") {
+    include_dirs = [
+      "$libao_root/include/ao",
+    ]
+    defines = [
+      "AO_BUILDING_LIBAO",
+      "AO_PLUGIN_PATH=\".\"",
+    ]
+    if (is_mac || is_posix) {
+      defines += [
+        "HAVE_DLOPEN",
+        "HAVE_DLFCN_H",
+        "DLOPEN_FLAG=(RTLD_NOW | RTLD_GLOBAL)",
+      ]
+    }
+    if (is_mac) {
+      defines += [
+        "SHARED_LIB_EXT=\".dylib\"",
+        "HAVE_MACOSX",
+      ]
+    } else if (is_win) {
+      if (libao_use_wmm) {
+        defines += [ "HAVE_WMM=1" ]
+      }
+    } else {
+      defines += [
+        "SHARED_LIB_EXT=\".so\"",
+        "HAVE_OSS",
+      ]
+    }
+    if (libao_use_alsa) {
+      defines += [
+        "HAVE_ALSA",
+        "USE_ALSA_MMIO",
+        "BROKEN_OSS",
+      ]
+    }
+    if (libao_use_sndio) {
+      defines += [ "HAVE_SNDIO_AUDIO" ]
+    }
+  }
+
+  if (!libao_use_system_libao) {
+    source_set("libao-just-to-silence-a-warning") {
+      configs += [
+        ":libao_config",
+        ":libao_private_config",
+        ":format",
+        ":maybe-uninitialized",
+        ":missing-field-initializers",
+        ":pointer-sign",
+        ":sign-compare",
+        ":stringop-truncation",
+        ":unused-function",
+        ":unused-parameter",
+        ":unused-variable",
+      ]
+      configs -= [
+        "//src/gn/config:symbol_visibility_hidden",
+      ]
+      sources = [
+        "$libao_root/src/ao_null.c",
+        "$libao_root/src/audio_out.c",
+        "$libao_root/src/config.c",
+        "$libao_root/src/ao_au.c",
+        "$libao_root/src/ao_wav.c",
+        "$libao_root/src/ao_raw.c",
+      ]
+      data_deps = []
+      if (libao_use_alsa) {
+        data_deps += [ ":libao-alsa" ]
+      }
+      if (libao_use_pulse) {
+        data_deps += [ ":libao-pulse" ]
+      }
+      if (is_win) {
+        if (libao_use_wmm) {
+          sources += [ "$libao_root/src/ao_wmm.c" ]
+          libs = [
+            "winmm.lib",
+            "ksuser.lib",
+          ]
+        }
+      } else if (is_mac) {
+        # Can add dep directly, no -Wl,--no-as-needed workaround.
+        deps = [ ":libao-mac" ]
+      } else {
+        # in theory, AIX is supported if HAVE_SYS_AUDIO_H:
+        #     "$libao_root/src/ao_aixs.c
+        assert(is_linux, "Unsupported OS: $current_os")
+      }
+    }
+  }
+
+  template("libao_plugin") {
+    shared_library(target_name) {
+      configs -= [
+        "//src/gn/config:symbol_visibility_hidden",
+        "//src/gn/config:no-undefined-in-obj"
+      ]
+      configs += [
+        ":libao_config",
+        ":libao_private_config",
+        ":unused-parameter",
+        ":pointer-sign",
+        ":stringop-truncation",
+        "//src/gn/config:undefined-in-obj-lazy-lookup",
+      ]
+      forward_variables_from(invoker, "*")
+      if (defined(configs_add)) {
+        configs += configs_add
+      }
+      if (defined(configs_del)) {
+        configs += configs_del
+      }
+      if (!defined(ldflags)) {
+        ldflags = []
+      }
+      if (is_mac || is_ios || is_tvos) {
+        ldflags += [
+          # Set install name so that an executable can specify an -rpath
+          "-install_name", "@rpath/" + target_name + ".dylib",
+          "-Wl,-rpath,@loader_path",
+        ]
+      } else if (is_posix) {
+        ldflags += [ "-Wl,-rpath=\$ORIGIN" ]
+      }
+    }
+  }
+
+  if (libao_use_pulse) {
+    libao_plugin("libao-pulse") {
+      configs_add = [
+        ":sign-compare",
+        ":type-limits",
+      ]
+      sources = [ "$libao_root/src/plugins/pulse/ao_pulse.c" ]
+      pulseflags = exec_script(
+        rebase_path(volcano_prefix + "/src/gn/vendor/pkgconfig.py", ".",
+                    rebase_path(target_out_dir, root_build_dir)),
+        [ "--cflags", "libpulse-simple" ], "trim string")
+      pulselibs = exec_script(
+        rebase_path(volcano_prefix + "/src/gn/vendor/pkgconfig.py", ".",
+                    rebase_path(target_out_dir, root_build_dir)),
+        [ "--libs", "libpulse-simple" ], "trim string")
+      assert(pulselibs == "-lpulse-simple -lpulse",
+            "Untested pulselibs=$pulselibs")
+      cflags = [ pulseflags ]
+      defines = [
+        "PACKAGE_BUGREPORT=\"Not available\"",
+      ]
+      libs = [ "pulse-simple", "pulse" ]
+    }
+  }
+
+  if (libao_use_alsa) {
+    libao_plugin("libao-alsa") {
+      configs_add = [
+        ":deprecated-declarations",
+        ":implicit-fallthrough",
+        ":sign-compare",
+        ":switch",
+        ":unused-variable",
+      ]
+      sources = [ "$libao_root/src/plugins/alsa/ao_alsa.c" ]
+      pkglibs = exec_script(
+          rebase_path(volcano_prefix + "/src/gn/vendor/pkgconfig.py", ".",
+                      rebase_path(target_out_dir, root_build_dir)),
+          [ "--libs", "alsa" ], "trim string")
+      assert(pkglibs == "-lasound",
+              "pkg-config --libs alsa: got $pkglibs, want -lasound")
+      libs = [ "asound" ]
+    }
+  }
+
+  libao_plugin("libao-mac") {
+    sources = [ "$libao_root/src/plugins/macosx/ao_macosx.c" ]
+    ldflags = [
+      "-framework", "AudioUnit",
+      "-framework", "CoreAudio",
+      "-framework", "CoreServices",
+    ]
+  }
+
+  source_set("libao") {
+    public_configs = [ ":libao_config" ]
+    all_dependent_configs = [ ":libao_config_ldflags" ]
+    sources = [ "$buildgn_path/ao_glue/ao_glue.cpp" ]
+    deps = [ "$volcano_prefix:core" ]
+    if (!libao_use_system_libao) {
+      deps += [ ":libao-just-to-silence-a-warning" ]
+    }
+  }
+
+} else {
+  assert(is_android, "Android uses ao_glue.h and not libao at all.")
+
+  config("libao_config") {
+    include_dirs = [ "$buildgn_path" ]
+  }
+
+  source_set("libao") {
+    assert(android_sdk_version != "24",
+           "android-$android_sdk_version did not include AAudio, want 26")
+    assert(android_sdk_version != "25",
+           "android-$android_sdk_version did not include AAudio, want 26")
+    public_configs = [ ":libao_config" ]
+    sources = [ "$buildgn_path/ao_glue/ao_glue_android.cpp" ]
+    deps = [ "$volcano_prefix:core" ]
+    aaudio_path = "$android_ndk_root/platforms/android-$android_sdk_version"
+    if (current_cpu == "x64") {
+      aaudio_path = "$aaudio_path/arch-x86_64/usr/lib64/"
+    } else if (current_cpu == "x86" || current_cpu == "arm" ||
+               current_cpu == "arm64") {
+      aaudio_path = "$aaudio_path/arch-$current_cpu/usr/lib/"
+    } else {
+      assert(false, "Unknown Android ABI: $current_cpu")
+    }
+    libs = [ "$aaudio_path/libaaudio.so" ]
+  }
+}

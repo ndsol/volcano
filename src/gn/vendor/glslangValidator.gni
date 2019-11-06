@@ -1,0 +1,113 @@
+# Copyright (c) 2017-2018 the Volcano Authors. Licensed under GPLv3.
+# glslangValidator compiles GLSL shader source into SPIR-V binary
+# Each file in sources must end in one of:
+#   .conf   optional config to glslangValidator
+#   .vert   for a vertex shader
+#   .tesc   for a tessellation control shader
+#   .tese   for a tessellation evaluation shader
+#   .geom   for a geometry shader
+#   .frag   for a fragment shader
+#   .comp   for a compute shader
+#
+import("//src/gn/vendor/subgnDefines.gni")
+
+template("glslangCompileHelper") {
+  action_foreach(target_name) {
+    forward_variables_from(invoker, "*")
+    outputs = [
+      target_gen_dir + "/{{source_file_part}}." + target_ext,
+      target_gen_dir + "/struct_{{source_file_part}}.h",
+    ]
+    if (!defined(deps)) {
+      deps = []
+    }
+    if (!defined(host_tool_path)) {
+      if (host_os == "mac") {
+        host_tool_path = "host_clang_$host_cpu/"
+      } else if (host_os != "win") {
+        host_tool_path = "host_$host_cpu/"
+      } else {
+        # Cross compiles do not work on win.
+        host_tool_path = "./"
+      }
+    }
+
+    script = "//src/gn/vendor/glslangValidator.py"
+    args = [
+      host_tool_path,
+      "-V",
+      "-g",
+    ]
+    if (var_name_prefix != "") {
+      args += [
+        "--variable-name",
+        "$var_name_prefix{{source_file_part}}",
+      ]
+    }
+    args += [
+      "-o",
+      "{{source_gen_dir}}/{{source_file_part}}." + target_ext,
+      "{{source}}",
+      "{{source_gen_dir}}/struct_{{source_file_part}}.h",
+    ]
+    if (defined(extra_flags)) {
+      args += [ "--extra_flags" ]
+      args += extra_flags
+    }
+
+    # copy_header which is generally under //vendor/volcano, unless the volcano
+    # tree is being used standalone (such as to run unit tests).
+    if (!defined(copy_header)) {
+      copy_header = volcano_prefix + "src/tools:copyHeader($host_toolchain)"
+    }
+    deps += [
+      copy_header,
+      "//src/gn/vendor/glslang:glslangValidator($host_toolchain)",
+    ]
+
+    public_configs = [ "//src/gn/vendor/glslang:glslangVulkan_gen_config" ]
+  }
+}
+
+# glslangVulkan: generate an output file from the name of the input file with
+# ".spv" appended. To load the generated .spv file at runtime, dynamically load
+# "gen/full/path/to/source_file.vert.spv" relative to the executable path
+# (for a source file "full/path/to/source_file.vert")
+#
+# extra_flags sets additional glslangValidator flags.
+# E.g. to optimize for size: extra_flags = [ "-Os" ]
+#
+# E.g. to compile an HLSL file, append ".hlsl" to the extension:
+# sources = [ "myapp.vert.hlsl", # HLSL code for vertex shader
+#             "myapp.frag" ]     # GLSL code for fragment shader
+# (Or, optionally, you could use extra_flags = [ "-D" ])
+# (See https://github.com/KhronosGroup/glslang/wiki/HLSL-FAQ)
+template("glslangVulkan") {
+  glslangCompileHelper(target_name) {
+    forward_variables_from(invoker, "*")
+    var_name_prefix = ""  # empty string disables the --variable-name flag
+    target_ext = "spv"
+  }
+}
+
+# glslangVulkanToHeader: generate an output file from the name of the input
+# file with ".h" appended. To load the output file as generated *source* code
+# at *build* time, the public_config //src/gn/vendor/glslang:glslang_config
+# below will add {{root_gen_dir}} to your include_dirs. Then just
+# #include "full/path/to/source.vert.h" (for "full/path/to/source.vert")
+#
+# extra_flags sets additional glslangValidator flags.
+# E.g. to optimize for size: extra_flags = [ "-Os" ]
+#
+# E.g. to compile an HLSL file, append ".hlsl" to the extension:
+# sources = [ "myapp.vert.hlsl", # HLSL code for vertex shader
+#             "myapp.frag" ]     # GLSL code for fragment shader
+# (Or, optionally, you could use extra_flags = [ "-D" ])
+# (See https://github.com/KhronosGroup/glslang/wiki/HLSL-FAQ)
+template("glslangVulkanToHeader") {
+  glslangCompileHelper(target_name) {
+    forward_variables_from(invoker, "*")
+    var_name_prefix = "spv_"
+    target_ext = "h"
+  }
+}

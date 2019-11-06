@@ -1,0 +1,7 @@
+# Copyright (c) 2017 the Volcano Authors. Licensed under GPLv3.
+
+buildconfig = "//src/gn/BUILDCONFIG.gn"
+default_args = {
+  volcano_prefix = "//"
+  mac_deployment_target = "10.11"
+}

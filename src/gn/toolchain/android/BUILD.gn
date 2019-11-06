@@ -1,0 +1,164 @@
+# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright (c) 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPLv3.
+
+import("//src/gn/toolchain/android/settings.gni")
+import("//src/gn/toolchain/toolchain.gni")
+import("//src/gn/toolchain/sysroot.gni")
+import("//src/gn/toolchain/gcc_toolchain.gni")
+import("//src/gn/toolchain/clang.gni")
+
+# The Android GCC toolchains share most of the same parameters, so we have this
+# wrapper around gcc_toolchain to avoid duplication of logic.
+#
+# Parameters:
+#  - toolchain_root
+#      Path to cpu-specific toolchain within the ndk.
+#  - sysroot
+#      Sysroot for this architecture.
+#  - lib_dir
+#      Subdirectory inside of sysroot where libs go.
+#  - binary_prefix
+#      Prefix of gcc executables. Not used for clang.
+template("android_gcc_toolchain") {
+  gcc_toolchain(target_name) {
+    assert(defined(invoker.toolchain_args),
+           "toolchain_args must be defined for android_gcc_toolchain()")
+    toolchain_args = invoker.toolchain_args
+    toolchain_args.current_os = "android"
+
+    assert(invoker.platform_arch != "", "platform_arch must be set")
+
+    # Use the clang specified by the toolchain if there is one. Otherwise fall
+    # back to the global flag.
+    if (defined(toolchain_args.is_clang)) {
+      toolchain_uses_clang = toolchain_args.is_clang
+    } else {
+      toolchain_uses_clang = is_clang
+    }
+
+    _clang_prefix = "${android_clang_toolchain_root}/bin/"
+    _gcc_prefix = "${invoker.toolchain_root}/bin/${invoker.binary_prefix}-"
+
+    # The tools should be run relative to the build dir.
+    _clang_prefix = rebase_path(_clang_prefix, root_build_dir)
+    _gcc_prefix = rebase_path(_gcc_prefix, root_build_dir)
+
+    if (toolchain_uses_clang) {
+      # Make our manually injected libs relative to the build dir.
+      _ndk_lib =
+          rebase_path(invoker.platform_arch + invoker.lib_dir, root_build_dir)
+      extra_ldflags = "-L" + _ndk_lib
+
+      cc = "${_clang_prefix}clang"
+      cxx = "${_clang_prefix}clang++"
+      ar = "${_clang_prefix}llvm-ar"
+      # llvm does not ship readelf or nm, fall back to the GCC dir
+      readelf = "${_gcc_prefix}readelf"
+      nm = "${_gcc_prefix}nm"
+    } else {
+      # Make our manually injected libs relative to the build dir.
+      _ndk_lib =
+          rebase_path(invoker.sysroot + "/" + invoker.lib_dir, root_build_dir)
+
+      cc = "${_gcc_prefix}gcc"
+      cxx = "${_gcc_prefix}g++"
+      ar = "${_gcc_prefix}ar"
+      readelf = "${_gcc_prefix}readelf"
+      nm = "${_gcc_prefix}nm"
+    }
+    ld = cxx
+    #strip = "${_prefix}strip"
+
+    if (toolchain_uses_clang || android_ndk_major_version < 16) {
+      solink_libs_dir = _ndk_lib
+    } else {
+      not_needed([ "_ndk_lib" ])
+      #if (_ndk_lib == "") {} # silence "Assignment had no effect"
+      solink_libs_dir = rebase_path(invoker.platform_arch + "/" + invoker.lib_dir,
+                                    root_build_dir)
+      extra_ldflags = "-L" + solink_libs_dir
+    }
+
+    libs_section_prefix = "$solink_libs_dir/crtbegin_dynamic.o"
+    libs_section_postfix = "$solink_libs_dir/crtend_android.o"
+
+    solink_libs_section_prefix = "$solink_libs_dir/crtbegin_so.o"
+    solink_libs_section_postfix = "$solink_libs_dir/crtend_so.o"
+
+    # Don't use .cr.so for loadable_modules since they are always loaded via
+    # absolute path.
+    loadable_module_extension = ".so"
+  }
+}
+
+template("android_gcc_toolchains_helper") {
+  android_gcc_toolchain("android_$target_name") {
+    forward_variables_from(invoker, "*")
+    toolchain_args.is_clang = false
+  }
+
+  android_gcc_toolchain("android_clang_$target_name") {
+    forward_variables_from(invoker, "*")
+    toolchain_args.is_clang = true
+  }
+
+  if (host_os == "android") {
+    assert(false, "Is android a cross-compiling platform? This code is broken!")
+    android_gcc_toolchain("host_android_$target_name") {
+      forward_variables_from(invoker, "*")
+      toolchain_args.is_clang = false
+      toolchain_args.current_cpu = host_cpu
+    }
+
+    android_gcc_toolchain("host_android_clang_$target_name") {
+      forward_variables_from(invoker, "*")
+      toolchain_args.is_clang = true
+      toolchain_args.current_cpu = host_cpu
+    }
+  }
+}
+
+android_gcc_toolchains_helper("x86") {
+  toolchain_root = x86_android_toolchain_root
+  sysroot = "$android_ndk_root/$x86_android_sysroot_subdir"
+  lib_dir = "usr/lib"
+  binary_prefix = "i686-linux-android"
+  platform_arch = "${android_ndk_platform_arch}x86/"
+  toolchain_args = {
+    current_cpu = "x86"
+  }
+}
+
+android_gcc_toolchains_helper("arm") {
+  toolchain_root = arm_android_toolchain_root
+  sysroot = "$android_ndk_root/$arm_android_sysroot_subdir"
+  lib_dir = "usr/lib"
+  binary_prefix = "arm-linux-androideabi"
+  platform_arch = "${android_ndk_platform_arch}arm/"
+  toolchain_args = {
+    current_cpu = "arm"
+  }
+}
+
+android_gcc_toolchains_helper("x64") {
+  toolchain_root = x86_64_android_toolchain_root
+  sysroot = "$android_ndk_root/$x86_64_android_sysroot_subdir"
+  lib_dir = "usr/lib64"
+  binary_prefix = "x86_64-linux-android"
+  platform_arch = "${android_ndk_platform_arch}x86_64/"
+  toolchain_args = {
+    current_cpu = "x64"
+  }
+}
+
+android_gcc_toolchains_helper("arm64") {
+  toolchain_root = arm64_android_toolchain_root
+  sysroot = "$android_ndk_root/$arm64_android_sysroot_subdir"
+  lib_dir = "usr/lib"
+  binary_prefix = "aarch64-linux-android"
+  platform_arch = "${android_ndk_platform_arch}arm64/"
+  toolchain_args = {
+    current_cpu = "arm64"
+  }
+}

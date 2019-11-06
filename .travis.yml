@@ -1,0 +1,100 @@
+os: linux
+dist: xenial
+language: cpp
+cache: ccache
+git:
+  submodules: false
+
+jobs:
+  fast_finish: true
+  include:
+    # os: osx
+    # osx_image: xcode10.2
+    # env:
+    #   - MATRIX_EVAL="HOMEBREW_NO_AUTO_UPDATE=1 brew install ccache && export PATH=\"/usr/local/opt/ccache/libexec:\$PATH\"; echo PATH=\$PATH"
+
+    - os: linux
+      addons:
+        apt:
+          sources:
+          - ubuntu-toolchain-r-test
+          packages:
+          - gcc-5
+          - g++-5
+          - libfontconfig1-dev
+          - libxrandr-dev
+          #- libxkbcommon-dev if needed, no need to install if not going to use it
+          #- libx11-xcb-dev
+          #- libxcb-keysyms1
+          #- libxcb-keysyms1-dev
+          #- libxcb-ewmh-dev
+          #- libxcb-randr0-dev
+          - libgl1-mesa-dev
+          - libglu1-mesa-dev
+          - libx11-xcb-dev
+          - libxcursor-dev
+          - libxinerama-dev
+          - libxi-dev
+          - patch
+          - pkg-config
+      env:
+        - MATRIX_EVAL="export CC=gcc-5; export CXX=g++-5; export CCACHE_MAXSIZE=5G"
+
+    - os: linux
+      addons:
+        apt:
+          sources:
+          - ubuntu-toolchain-r-test
+          packages:
+          - gcc-7
+          - g++-7
+          - libfontconfig1-dev
+          - libxrandr-dev
+          #- libxkbcommon-dev if needed, no need to install if not going to use it
+          #- libx11-xcb-dev
+          #- libxcb-keysyms1
+          #- libxcb-keysyms1-dev
+          #- libxcb-ewmh-dev
+          #- libxcb-randr0-dev
+          - libgl1-mesa-dev
+          - libglu1-mesa-dev
+          - libx11-xcb-dev
+          - libxcursor-dev
+          - libxinerama-dev
+          - libxi-dev
+          - patch
+          - pkg-config
+      env:
+        - MATRIX_EVAL="export CC=gcc-7; export CXX=g++-7"
+
+before_install:
+- eval "${MATRIX_EVAL}"
+- $CC -v
+- $CXX -v
+- CC_WRAPPER=ccache
+- ccache --zero-stats
+
+# create a fakes dir to catch any attempt to run ninja (or anything else) using PATH
+# because the system may have ninja installed, but that ninja is an older version that will fail
+script: export BOOTSTRAP_ON_TRAVIS_J=3 &&
+  export VOLCANO_SKIP_CACHE=1 &&
+  mkdir fakes &&
+  export PATH=$PWD/fakes:$PATH &&
+  ( echo '#!/bin/bash'; echo "echo fakes/gn in PATH was hit"; echo "exit 1" ) > fakes/gn &&
+  chmod u+x fakes/gn &&
+  ( echo '#!/bin/bash'; echo "echo fakes/ninja in PATH was hit"; echo "exit 1" ) > fakes/ninja &&
+  chmod u+x fakes/ninja &&
+  ./build.cmd &&
+  vendor/subgn/gn gen out/Release "--args=is_debug = false is_official_build = true" &&
+  cat out/Debug/args.gn >> out/Release/args.gn &&
+  echo skip due to insufficient memory on travis-ci vendor/subgn/ninja -C out/Release &&
+  echo "use_vulkanmemoryallocator = false" >> out/Debug/args.gn &&
+  vendor/subgn/ninja -C out/Debug &&
+  ccache --show-stats
+
+notifications:
+  email:
+    on_success: never
+    on_failure: always
+  slack:
+    secure: aQpxhbENA/q/q7CPQlddT3Nxjy30yanlQMZDS26ua5J2WvDyDrONtJaz04WEHZzbnuNfxOBS3t1SnDcBQfAOuVDNg7Uax4nEA5JFdTLNRlNVhLRDn6jfuziKLAIFTBOH2seDFRHW7HwchDaIfwTjg88PQW2+WAj21DNSyLGmlCv6u3ZaO4SU610yudf5nhOHjqmK4AFu+p+NjacHdrnZ+R3tXZjMxSuyYIRR0z/OmGwi20r/KpYVKeBoewOsa9Q4iPjderRX/RoNlpNkYW2rZDXW9rWhCfvtXxXtYmJZaGjF4wK+mirFdy3ZV+lAh3zsibrxFXpWcXfapuC0blzPqX2jGHGZo6lVjqzRRshRSAbfNiIjJ+VJGxZ58MAAhuVEOca+nwtYSpuSYq6omsqaKsz2nxszGrZakNIEyLxj7O6N5OKemqq94ofG8hcM2oBvT2ZsyLAwFfhGYCwOcbQKF74slnsovV5VNOPvi44gksE3foKbqDDZBbYokhIkvrbIHXbOiCO59vBkE3FMoX29Jjk11X5QGlRAUZwjIR095IS9qMCSA/EPyFhOC8n0gG24jHZx2r7pbdZQfqayg72+Tk70CR58rklgClzYRRNL8OXxWxG9OsoXj2/dGElSsaQZSZNHJtPlvhG3pJ0MdN2k5CH/A1k4bCN9bKOtL0OwybE=

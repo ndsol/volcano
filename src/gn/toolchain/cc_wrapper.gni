@@ -1,0 +1,36 @@
+# Copyright (c) 2014 The Chromium Authors. All rights reserved.
+# Copyright (c) 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPLv3.
+
+# Defines the configuration of cc wrapper
+# ccache: a c/c++ compiler cache which can greatly reduce recompilation times.
+# icecc, distcc: it takes compile jobs from a build and distributes them among
+#                remote machines allowing a parallel build.
+#
+# TIPS
+#
+# 1) ccache
+# Use ccache 3.2 or later to avoid clang unused argument warnings:
+# https://bugzilla.samba.org/show_bug.cgi?id=8118
+#
+# To avoid -Wparentheses-equality clang warnings, at some cost in terms of
+# speed, you can do:
+# export CCACHE_CPP2=yes
+#
+# 2) icecc
+# To use icecc and ccache together, set cc_wrapper = "ccache" with
+# export CCACHE_PREFIX=icecc
+
+declare_args() {
+  # Set to "ccache", "icecc" or "distcc".  Probably doesn't work on windows.
+  cc_wrapper = ""
+}
+# ccache before 3.4 (travis CI uses xenail with ccache 3.2.4) causes g++-7 to
+# warn of -Wimplicit-fallthrough incorrectly because ccache strips the
+# "// fall through" comment. Adding -C to CFLAGS/CXXFLAGS works around this.
+# WARNING: Some configurations "look like" you are using gcc but you are using
+# clang. clang does not know about the "-C" CFLAG/CXXFLAG.
+cc_wrapper_gcc_workaround = ""
+if (cc_wrapper != "") {
+  cc_wrapper_gcc_workaround = "-C"
+}

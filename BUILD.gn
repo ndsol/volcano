@@ -1,0 +1,146 @@
+# Copyright (c) 2017-2018 the Volcano Authors. Licensed under GPLv3.
+import("//src/gn/vendor/subgnDefines.gni")
+
+declare_args() {
+  is_skia_standalone = true
+  use_vulkanmemoryallocator = true
+}
+
+config("language_config") {
+  if (!is_win) {
+    cflags = [ "-Wno-missing-field-initializers" ]
+  }
+  if (!use_vulkanmemoryallocator) {
+    defines = [ "VOLCANO_DISABLE_VULKANMEMORYALLOCATOR" ]
+  }
+}
+
+config("language_local_config") {
+  include_dirs = [ get_path_info(".", "abspath" ) ]
+}
+
+source_set("core") {
+  sources = [
+    "src/core/find_in_paths.cpp",
+    "src/core/log.cpp",
+    "src/core/mmap.cpp",
+    "src/core/reflectionmap.cpp",
+    "src/core/reflectionsetup.cpp",
+    "src/core/utf8dec.cpp",
+    "src/core/utf8enc.cpp",
+    "src/core/VkEnum.cpp",
+  ]
+
+  public_deps = [ "//src/gn/vendor/vulkan" ]
+  public_configs = [ ":language_local_config" ]
+  all_dependent_configs = [
+    ":language_config",
+    "//src/gn/vendor/glfw:glfw_config",
+  ]
+  public = [
+    "src/core/VkPtr.h",
+  ]
+}
+
+source_set("language_with_custom_config") {
+  sources = [
+    "src/language/choose.cpp",
+  ]
+  include_dirs = [ "$vulklayers/layers" ]
+  public_deps = [ ":core" ]
+}
+
+static_library("language") {
+  sources = [
+    "src/language/debug.cpp",
+    "src/language/device.cpp",
+    "src/language/imageview.cpp",
+    "src/language/language.cpp",
+    "src/language/old_debug.cpp",
+    "src/language/open.cpp",
+    "src/language/requestqfams.cpp",
+    "src/language/supported_queues.cpp",
+    "src/language/swapchain.cpp",
+  ]
+  public = [ "src/language/language.h" ]
+  deps = [ ":language_with_custom_config", ]
+  public_deps = [ ":core" ]
+}
+
+static_library("command") {
+  sources = [
+    "src/command/add_depth.cpp",
+    "src/command/command.cpp",
+    "src/command/compute.cpp",
+    "src/command/fence.cpp",
+    "src/command/pipeline.cpp",
+    "src/command/create_pass.cpp",
+    "src/command/create_pipe.cpp",
+    "src/command/render.cpp",
+    "src/command/shader.cpp",
+  ]
+  public = [ "src/command/command.h" ]
+  # gli is used for format queries like gli::is_depth().
+  deps = [ "src/gn/vendor/gli" ]
+  public_deps = [ ":language" ]
+}
+
+source_set("memory_with_workaround") {
+  sources = [
+    "src/memory/layout.cpp",
+  ]
+  public = [ "src/memory/memory.h" ]
+  public_deps = [ ":command" ]
+  deps = [ "//src/gn/vendor/vulkanmemoryallocator" ]
+  configs += [ "//src/gn/config:cc_wrapper_gcc_workaround" ]
+}
+
+source_set("memory") {
+  sources = [
+    "src/memory/dev_framebufs.cpp",
+    "src/memory/buffer.cpp",
+    "src/memory/descriptor.cpp",
+    "src/memory/dev_mem.cpp",
+    "src/memory/image.cpp",
+    "src/memory/memory.cpp",
+    "src/memory/stage.cpp",
+    "src/memory/transition.cpp",
+  ]
+  public = [ "src/memory/memory.h" ]
+  public_deps = [
+    ":memory_with_workaround",
+    ":command",
+  ]
+  deps = [ "//src/gn/vendor/vulkanmemoryallocator" ]
+}
+
+source_set("science") {
+  sources = [
+    "src/science/compute.cpp",
+    "src/science/descriptor.cpp",
+    "src/science/image.cpp",
+    "src/science/pipe.cpp",
+    "src/science/reflect.cpp",
+    "src/science/sampler.cpp",
+    "src/science/science.cpp",
+  ]
+  public = [ "science.h" ]
+  public_deps = [ ":memory" ]
+  deps = [ "//src/gn/vendor/spirv_cross" ]
+}
+
+group("volcano") {
+  public_deps = [
+    ":science",
+  ]
+}
+
+import("//src/gn/vendor/androidExecutable.gni")
+group("default") {
+  if (!is_android) {
+    testonly = true
+    deps = [
+      "test",
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+# Copyright (c) 2018 the Volcano Authors. Licensed under GPLv3.
+
+declare_args() {
+  use_spirv_cross_exceptions = false
+}

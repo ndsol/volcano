@@ -1,0 +1,98 @@
+# Copyright (c) 2017-2018 the Volcano Authors. Licensed under GPLv3.
+import("//src/gn/config/compiler.gni")
+import("//src/gn/toolchain/android/settings.gni")
+import("//src/gn/toolchain/cc_wrapper.gni")
+import("//src/gn/vendor/subgnDefines.gni")
+if (current_os == "mac") {
+  import("//src/gn/toolchain/mac/mac_sdk.gni")
+}
+
+if (current_os == "win") {
+  import("//src/gn/toolchain/win/settings.gni")
+
+  libskia = "skia.lib"
+  libskia_os_args = " win_vc = \"" + visual_studio_path + "/VC\"" +
+    " use_dynamic_crt = "
+  if (use_dynamic_crt) {
+    libskia_os_args += "true"
+  } else {
+    libskia_os_args += "false"
+  }
+} else {
+  libskia = "libskia.a"
+  libskia_os_args = ""
+}
+
+declare_args() {
+  if (current_os == host_os) {
+    libskia_path = "$root_out_dir/$skiasubdir/$libskia"
+  } else {
+    libskia_path = "$root_out_dir/../$skiasubdir/$libskia"
+  }
+  libskia_extra_args = ""
+}
+
+skia_args = "skia_enable_tools = false " +
+  "skia_use_system_libjpeg_turbo = false " +
+  # ndk_api: Vulkan requires API >= 24, even though skia works on earlier.
+  "ndk_api = $android_sdk_version" +
+  libskia_os_args
+
+if (current_os != "win" && cc_wrapper != "") {
+  skia_args += " cc_wrapper=\"$cc_wrapper\""
+  if (current_os != "mac" && current_os != "android" && !is_clang) {
+    # Do not activate workaround. Nothing in skia produces the warning,
+    # but src/sksl/SkSLCompiler.cpp uses STRINGIFY() in a way that
+    # fails when -C is present. (Compiler bug?)
+    #extra_cflags_c += [ cc_wrapper_gcc_workaround ]
+    #extra_cflags_cc += [ cc_wrapper_gcc_workaround ]
+  }
+}
+
+s=""
+p=""
+foreach(i, extra_cflags_c) {
+  s=s + p + " \"" + i + "\""
+  p=","
+}
+if (s != "") {
+  skia_args += " extra_cflags_c=[" + s + " ]"
+}
+s=""
+p=""
+foreach(i, extra_cflags_cc) {
+  s=s + p + " \"" + i + "\""
+  p=","
+}
+if (s != "") {
+  skia_args += " extra_cflags_cc=[" + s + " ]"
+}
+if (current_os != host_os) {
+  skia_args += " host_os = \"$host_os\""
+  skia_args += " current_os = \"$current_os\""
+  skia_args += " current_cpu = \"$current_cpu\""
+  skia_args += " target_os = \"$current_os\""
+  skia_args += " target_cpu = \"$current_cpu\""
+  skia_args += " ndk = \"$android_ndk_root\""
+} else if (current_os == "mac") {
+  skia_args += " mac_deployment_target=\"$mac_deployment_target\""
+}
+
+skia_args += libskia_extra_args
+
+# output should only be generated once per cpu
+# generate skia rules for each variant (i.e. each target_cpu).
+subgn_dir = rebase_path("../../../../vendor/subgn")
+exec_script("//src/gn/vendor/subninja.py",
+  [ # arguments
+    "--addpath=$subgn_dir",
+    "--chdir=$skiasubdir",
+    "--exec=$subgn_dir/gn",
+    "-q",
+    "gen", ".",
+    "--root=../" + rebase_path(volcano_prefix + "vendor/skia", root_build_dir),
+    "--args=" + skia_args,
+  ],
+  "generate output",             # input_conversion
+  [ volcano_prefix + "vendor/skia/BUILD.gn" ]  # file_dependencies
+)

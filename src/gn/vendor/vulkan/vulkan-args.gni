@@ -1,0 +1,138 @@
+# Copyright 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+import("../subgnDefines.gni")
+
+declare_args() {
+  moltenvk_debug = false
+
+  vulkan_api_major = 1
+  vulkan_api_minor = 1
+
+  # TODO: extract this from vulkan/vulkan_core.h #define VK_HEADER_VERSION
+  vulkan_header_version = 119
+
+  use_vulkan_layers = true
+  vulkan_install_dir = "$root_gen_dir/../vulkan"
+}
+
+vk_gen_include_dir = "$root_gen_dir/../include"
+cereal_dir = "$vulkloader/../cereal"
+
+template("replace_in_file") {
+  action(target_name) {
+    forward_variables_from(invoker, [
+      "deps",
+      "inputs",
+      "pattern",
+      "replacement",
+      "vk_out_dir",
+    ])
+    if (!defined(vk_out_dir)) {
+      vk_out_dir = "$vulkan_install_dir"
+    }
+    output_filename = "$vk_out_dir/$target_name"
+    outputs = [ output_filename ]
+
+    inputs += [ "//src/gn/toolchain/rep.py" ]
+    script = "//src/gn/toolchain/rep.py"
+    args = [
+      rebase_path(inputs[0]),
+      rebase_path(output_filename),
+      pattern,
+      replacement,
+    ]
+  }
+}
+
+template("vk_layer") {
+  layer_name = "VkLayer_$target_name"
+  json_file_name = layer_name + ".json"
+  json_inter = "intermediate-$target_name"
+  json_path = "$vulklayers/layers/json"
+
+  replace_in_file(json_inter) {
+    pattern = "\"library_path\": \"@RELATIVE_LAYER_BINARY@\","
+    if (is_win) {
+      layerf = layer_name + ".dll"
+    } else if (is_mac || is_ios || is_tvos) {
+      layerf = "./lib$layer_name" + ".dylib"
+    } else {
+      layerf = "./lib$layer_name" + ".so"
+    }
+    replacement = "\"library_path\": \"$layerf\","
+    inputs = [ "$json_path/$json_file_name" + ".in" ]
+    vk_out_dir = "$root_gen_dir/unused-intermediate"
+  }
+
+  replace_in_file(json_file_name) {
+    pattern = "\"api_version\": \"@VK_VERSION@\","
+    replacement = "\"api_version\": \"$vulkan_api_major.$vulkan_api_minor.$vulkan_header_version\","
+    inputs = [ "$root_gen_dir/unused-intermediate/$json_inter" ]
+    vk_out_dir = "$vulkan_install_dir/explicit_layer.d"
+    deps = [ ":$json_inter" ]
+  }
+
+  if (defined(invoker.sources)) {
+    shared_library("VkLayer_$target_name") {
+      forward_variables_from(invoker, "*")
+
+      output_dir = vulkan_install_dir + "/explicit_layer.d"
+      output_name = "VkLayer_" + target_name
+
+      if (!defined(deps)) {
+        deps = []
+      }
+      deps += [
+        "config:layer-configs",
+        ":vulkan-headers",
+      ]
+      configs -= [ "//src/gn/config:strict-overflow" ]
+      if (defined(configs_add)) {
+        configs += configs_add
+      }
+
+      if (is_win) {
+        # Use the /MD and /MDd C Runtime.
+        configs += [ "//src/gn/config/win:dynamic_crt" ]
+        libs = [ "advapi32.lib" ]
+        # .def files are only needed if functions are not decorated
+        # with __declspec(dllexport). The .def file names the
+        # functions to be exported from the DLL.
+        #
+        # A .def in sources automagically adds /def: to the linker:
+        if (defined(sources)) {
+          # Only add a .def file if the layer *does* have sources
+          # (If the layer has no sources, it will not export anything either)
+          sources += [ rebase_path(vulklayers +
+                                   "/layers/VkLayer_$target_name" + ".def") ]
+        }
+      } else if (is_mac || is_ios || is_tvos) {
+        ver = vulkan_api_major
+        ldflags = [
+          # Set install name so that an executable can specify an -rpath
+          "-install_name", "@rpath/lib" + target_name + "." + ver + ".dylib",
+          "-Wl,-rpath,@loader_path/",
+        ]
+      } else if (is_posix || is_linux || is_android) {
+        # TODO: maybe use configs += //src/gn/config/posix:executable_ldconfig.
+        ldflags = [ "-Wl,-rpath=\$ORIGIN" ]
+      } else {
+        assert(false, "Unsupported OS")
+      }
+      deps += [
+        ":VkLayer_utils",
+        ":$json_file_name",
+      ]
+    }
+  } else {
+    group("VkLayer_$target_name") {
+      not_needed(invoker, "*")
+    }
+  } # if (defined(invoker.sources))
+}
+
+if (!is_win) {
+  import("//src/gn/toolchain/compiler_version.gni")
+} else {
+  gcc_version = 0
+}

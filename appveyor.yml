@@ -1,0 +1,27 @@
+version: 1.0.{build}
+image: Visual Studio 2017
+test: off
+# Free accounts are capped at 1 job but ask anyway
+max_jobs: 4
+
+environment:
+  PYTHON_PATH: "C:/Python35"
+  PYTHON_PACKAGE_PATH: "C:/Python35/Scripts"
+  VOLCANO_SKIP_CACHE: "1"
+
+before_build:
+  - "SET PATH=C:\\Python35;C:\\Python35\\Scripts;%PATH%"
+
+build_script:
+- cmd: >-
+    call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat"
+
+    git submodule update --init --recursive
+
+    cd vendor\skia
+
+    c:\python37\python.exe tools\git-sync-deps
+
+    cd ..\..
+
+    build.cmd

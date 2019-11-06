@@ -1,0 +1,57 @@
+# Copyright 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+import("skiaTarget.gni")
+
+# skia_run_subninja is empty but ensures skiaTarget.gni is imported.
+source_set("skia_run_subninja") {
+}
+
+source_set("skiaglue") {
+  sources = [ "skiaglue.cpp" ]
+  deps = [
+    ":skia",
+    volcano_prefix + ":volcano",
+    "../gli",
+  ]
+  configs -= [ "//src/gn/config:strict-overflow" ]
+}
+
+config("skia_public_config") {
+  include_dirs = [
+    volcano_prefix + "vendor/skia/include/android",
+    volcano_prefix + "vendor/skia/include/c",
+    volcano_prefix + "vendor/skia/include/codec",
+    volcano_prefix + "vendor/skia/include/config",
+    volcano_prefix + "vendor/skia/include/core",
+    volcano_prefix + "vendor/skia/include/effects",
+    volcano_prefix + "vendor/skia/include/encode",
+    volcano_prefix + "vendor/skia/include/gpu",
+    volcano_prefix + "vendor/skia/include/gpu/gl",
+    volcano_prefix + "vendor/skia/include/pathops",
+    volcano_prefix + "vendor/skia/include/ports",
+    volcano_prefix + "vendor/skia/include/svg",
+    volcano_prefix + "vendor/skia/include/utils",
+    volcano_prefix + "vendor/skia/include/utils/mac",
+  ]
+}
+
+source_set("skia") {
+  public_configs = [ ":skia_public_config" ]
+  libs = [ libskia_path ]
+  if (is_win) {
+    libs += [
+      "opengl32.lib",
+    ]
+  } else if (is_android) {
+    libs += [
+      "EGL",
+      "GLESv3",
+    ]
+  } else if (!is_mac) {
+    libs += [
+      "fontconfig",
+      "freetype",
+      "GL",
+    ]
+  }
+}

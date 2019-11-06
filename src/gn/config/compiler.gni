@@ -1,0 +1,62 @@
+# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright (c) 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPLv3.
+
+declare_args() {
+  # Compile in such a way as to enable profiling of the generated code. For
+  # example, don't omit the frame pointer and leave in symbols.
+  enable_profiling = false
+
+  # use_debug_fission: whether to use split DWARF debug info
+  # files. This can reduce link time significantly, but is incompatible
+  # with some utilities such as icecc and ccache. Requires gold and
+  # gcc >= 4.8 or clang.
+  # http://gcc.gnu.org/wiki/DebugFission
+  #
+  # This is a placeholder value indicating that the code below should set
+  # the default.  This is necessary to delay the evaluation of the default
+  # value expression until after its input values such as use_gold have
+  # been set, e.g. by a toolchain_args() block.
+  use_debug_fission = false
+
+  # Tell VS to create a PDB that references information in .obj files rather
+  # than copying it all. This should improve linker performance. mspdbcmf.exe
+  # can be used to convert a fastlink pdb to a normal one.
+  is_win_fastlink = false
+
+  # Whether to use the gold linker from binutils instead of lld or bfd.
+  use_gold = false
+
+  # Enable Link Time Optimization in optimized builds (output programs run
+  # faster, but linking is up to 5-20x slower).
+  enable_lto = is_official_build && is_win && !is_clang
+
+  # Optional array containing extra assembler arguments.
+  # Like 'asmflags' this value is passed to all tools that take
+  # an .asm or .S input.
+  extra_asmflags = []
+
+  # Optional array containing extra compiler arguments.
+  # Like 'cflags' this value is passed to the C, C++, Objective C, and
+  # Objective C++ compilers.
+  extra_cflags = []
+
+  # Optional array containing extra compiler arguments.
+  # Like 'cflags_c' this value is only passed to the C compiler.
+  extra_cflags_c = []
+
+  # Optional array containing extra compiler arguments.
+  # Like 'cflags_cc' this value is only passed to the C++ compiler.
+  extra_cflags_cc = []
+
+  # Optional array containing extra compiler arguments.
+  # Like 'cflags_objc' this value is only passed to the Objective C compiler.
+  extra_cflags_objc = []
+
+  # Optional array containing extra compiler arguments.
+  # Like 'cflags_objcc' this value is only passed to the Objective C++ compiler.
+  extra_cflags_objcc = []
+
+  # Optional array containing extra linker arguments.
+  extra_ldflags = []
+}

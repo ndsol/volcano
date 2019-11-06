@@ -1,0 +1,44 @@
+on:
+  push:
+    branches: master
+  pull_request: []
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    # create a fakes dir in case ninja from PATH is used. The system has
+    # ninja installed but it is an older version that will fail
+    - run: |
+        sudo apt-get install libxrandr-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libglu1-mesa-dev libxi-dev
+        mkdir fakes
+        export PATH=$PWD/fakes:$PATH
+        for fake in gn ninja; do
+          ( echo '#!/bin/bash'
+            echo "echo fakes/$fake in PATH was hit"
+            echo 'exit 1' ) > fakes/$fake
+        done
+        echo ccache --zero-stats
+        mkdir -p "$PWD/out"
+        export VOLCANO_SKIP_CACHE=1
+        export VOLCANO_ARGS_REQUEST="$PWD/out/volcano-args.txt"
+        VOLCANO_NO_OUT=1 ./build.cmd
+        if [ -f "$VOLCANO_ARGS_REQUEST" ]; then
+          volcanoargs=$(cat "$VOLCANO_ARGS_REQUEST")
+        else
+          echo "BUG: ./build.cmd ignored VOLCANO_ARGS_REQUEST"
+          exit 1
+        fi
+        unset VOLCANO_ARGS_REQUEST
+        vendor/subgn/gn gen out/Debug "--args=$volcanoargs"
+        cp out/Debug/args.gn out/Debug/args-untouched.txt
+    - run: |
+        cp out/Debug/args-untouched.txt out/Debug/args.gn
+        echo "use_vulkanmemoryallocator = false" >> out/Debug/args.gn
+        vendor/subgn/ninja -C out/Debug
+    - run: |
+        cp out/Debug/args-untouched.txt out/Debug/args.gn
+        echo "use_vulkanmemoryallocator = true" >> out/Debug/args.gn
+        vendor/subgn/ninja -C out/Debug
+    - run: |
+        echo ccache --show-stats

@@ -1,0 +1,16 @@
+name: "win2016"
+on:
+  push:
+    branches: master
+  pull_request: []
+jobs:
+  build:
+    runs-on: windows-2016
+    steps:
+    - uses: actions/checkout@v2
+    - run: |
+        call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        set GIT_SYNC_SHALLOW=0
+        set VOLCANO_SKIP_CACHE=1
+        build.cmd
+      shell: cmd

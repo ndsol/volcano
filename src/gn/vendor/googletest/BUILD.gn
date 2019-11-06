@@ -1,0 +1,24 @@
+import("//src/gn/vendor/subgnDefines.gni")
+
+declare_args() {
+  googletest_rel_dir = "vendor/subgn/testing/gtest/"
+}
+
+# Use volcano_prefix to automatically find googletest relative to volcano
+googletest_dir = volcano_prefix + googletest_rel_dir
+
+config("googletest_public_config") {
+  include_dirs = [ "$googletest_dir/include" ]
+  if (!is_win) {
+    cflags = [
+      "-Wno-missing-field-initializers",
+      "-Wno-format-nonliteral",
+      "-Wno-strict-overflow",
+    ]
+  }
+}
+source_set("googletest") {
+  public_configs = [ ":googletest_public_config" ]
+  include_dirs = [ googletest_dir ]
+  sources = [ "$googletest_dir/src/gtest-all.cc" ]
+}

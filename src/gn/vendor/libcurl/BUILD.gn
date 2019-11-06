@@ -1,0 +1,338 @@
+# Copyright (c) 2017-2018 the Volcano Authors. Licensed under GPLv3.
+import("//src/gn/toolchain/android/settings.gni")
+import("//src/gn/toolchain/toolchain.gni") # for add_to_android_manifest
+import("../subgnDefines.gni") # for volcano_prefix
+import("../androidExecutable.gni") # for androidResource
+
+declare_args() {
+  libcurl_prefix = "//vendor/libcurl"
+  libcurl_use_system_ssl = !is_android && !is_mac
+}
+
+declare_args() {
+  libcurl_root = rebase_path(libcurl_prefix, ".",
+                             rebase_path(target_out_dir, root_build_dir))
+}
+
+# buildgn_path is the path to this BUILD.gn file
+buildgn_path = rebase_path("//src/gn/vendor/libcurl", ".",
+                           rebase_path(target_out_dir, root_build_dir))
+
+have_config_h = true
+if (is_win) {
+  # No HAVE_CONFIG_H. Use shipped config - see lib/curl_setup.h.
+  have_config_h = false
+} else if (is_mac || is_ios || is_tvos) {
+} else if (is_linux || is_android) {
+} else {
+  assert(false, "Unsupported current_os=$current_os")
+}
+
+config("libcurl_private_config") {
+  if (have_config_h) {
+    defines = [ "HAVE_CONFIG_H" ]
+  }
+  if (is_win) {
+    defines = [
+      "BUILDING_LIBCURL",
+      "CURL_DISABLE_LDAP",
+      "CURL_DISABLE_CRYPTO_AUTH",
+      "CURL_DISABLE_IMAP",
+      "CURL_DISABLE_SMTP",
+      "CURL_DISABLE_POP3",
+      "USE_WINDOWS_SSPI",
+      "USE_SCHANNEL",
+    ]
+    libs = [
+      "Ws2_32.lib",
+      "Crypt32.lib",
+      "Advapi32.lib",
+    ]
+  }
+  include_dirs = [
+    "$libcurl_root/lib/",
+  ]
+}
+
+# TODO: which source files have this warning on win32?
+config("libcurl_private_no_conditional-expression-is-constant") {
+  if (is_win) {
+    cflags = [ "/wd4127" ]
+  }
+}
+
+config("libcurl_private_no_format-nonliteral") {
+  if (!is_win || is_clang) {
+    cflags = [ "-Wno-format-nonliteral" ]
+  }
+}
+
+config("libcurl_private_no_strict-overflow") {
+  if (!is_win || is_clang) {
+    cflags = [ "-Wno-strict-overflow" ]
+  }
+}
+
+add_to_app("add_to_app") {}
+permission("permission") {
+  android = [
+    "<uses-permission android:name=\"android.permission.INTERNET\"/>",
+  ]
+}
+
+config("libcurl_config") {
+  configs = [ ":add_to_app" ]
+  include_dirs = [
+    "$libcurl_root/include/",
+    rebase_path(target_gen_dir, ".",
+                rebase_path(target_out_dir, root_build_dir)),
+  ]
+  defines = [ "CURL_STATICLIB" ]
+}
+
+if (defined(android_ndk_root)) {
+  copy("curl_ca_bundle_host") {
+    # Android does not allow apps to access the system CA bundle
+    # Package up the host OS CA bundle
+    if (host_os == "mac") {
+      host_bundle = "/etc/ssl/cert.pem"
+    } else if (host_os == "linux") {
+      host_bundle = "/etc/ssl/certs/ca-certificates.crt"
+    } else {
+      assert(false, "Android cannot build from $host_os")
+    }
+    sources = [ host_bundle ]
+    # This step is a copy step to force the filename to always be "cert.pem"
+    outputs = [ "$target_gen_dir/ssl/cert.pem" ]
+  }
+
+  resource("curl_ca_bundle") {
+    deps = [ ":curl_ca_bundle_host" ]
+    sources = [ "$target_gen_dir/ssl/cert.pem" ]
+    fileparts = [ "ssl/cert.pem" ]
+  }
+}
+
+sizes_c_name = "curl_config.h.sizes.c"
+source_set(sizes_c_name) {
+  configs += [
+    ":libcurl_config",
+    ":libcurl_private_config",
+  ]
+  sources = [ "$buildgn_path/sizes.c" ]
+}
+
+copy("curl_config.h.sizes.o") {
+  deps = [ ":$sizes_c_name" ]
+  if (is_win) {
+    sources = [ "$target_out_dir/$sizes_c_name/sizes.obj" ]
+  } else {
+    sources = [ "$target_out_dir/$sizes_c_name/sizes.o" ]
+  }
+  outputs = [ "$target_gen_dir/curl_config.h.sizes.o" ]
+}
+
+action("curl_config.h") {
+  deps = [ ":curl_config.h.sizes.o" ]
+  if (defined(android_ndk_root)) {
+    deps += [ ":curl_ca_bundle" ]
+  }
+  output_filename = "$target_gen_dir/curl_config.h"
+  outputs = [ output_filename ]
+  script = "$buildgn_path/gen_curl_config.py"
+  args = [
+    rebase_path(libcurl_prefix, root_build_dir),
+    rebase_path(output_filename, root_build_dir),
+    current_os,
+  ] + rebase_path(get_target_outputs(":curl_config.h.sizes.o"), root_build_dir)
+}
+
+group("maybe_curl_config.h") {
+  deps = [ ":permission" ]
+  if (have_config_h) {
+    deps += [ ":curl_config.h" ]
+  }
+}
+
+source_set("libcurl_vtls") {
+  deps = [ ":maybe_curl_config.h" ]
+  all_dependent_configs = [ ":libcurl_config" ]
+  configs += [ ":libcurl_private_config" ]
+  sources = [
+    # From lib/Makefile.inc, copy/paste LIB_VTLS_CFILES into bash.
+    # Remove spaces around '=' and add double quotes:
+    # LIB_VTLS_CFILES="file.c ... altsvc.c"
+    # Execute that, then execute this:
+    # for a in LIB_VTLS_CFILES; do echo "    \"lib/$a\","; done
+    "$libcurl_root/lib/vtls/openssl.c",
+    "$libcurl_root/lib/vtls/gtls.c",
+    "$libcurl_root/lib/vtls/vtls.c",
+    "$libcurl_root/lib/vtls/nss.c",
+    "$libcurl_root/lib/vtls/polarssl.c",
+    "$libcurl_root/lib/vtls/polarssl_threadlock.c",
+    "$libcurl_root/lib/vtls/cyassl.c",
+    "$libcurl_root/lib/vtls/schannel.c",
+    "$libcurl_root/lib/vtls/schannel_verify.c",
+    "$libcurl_root/lib/vtls/sectransp.c",
+    "$libcurl_root/lib/vtls/gskit.c",
+    "$libcurl_root/lib/vtls/mbedtls.c",
+    "$libcurl_root/lib/vtls/mesalink.c",
+  ]
+  if (is_win) {
+    # Windows: use system crypto
+  } else if (libcurl_use_system_ssl) {
+    pkglibs = exec_script(
+        rebase_path(volcano_prefix + "/src/gn/vendor/pkgconfig.py", ".",
+                    rebase_path(target_out_dir, root_build_dir)),
+        [ "--libs", "libssl" ], "trim string")
+    assert(pkglibs == "-lssl",
+           "pkg-config --libs libssl: want -lssl, got $pkglibs")
+    libs = [
+      "ssl",
+      "crypto",
+    ]
+  } else {
+    deps += [ "../openssl" ]
+  }
+}
+
+source_set("libcurl_warnings_suppressed") {
+  deps = [ ":maybe_curl_config.h" ]
+  configs += [
+    ":libcurl_private_config",
+    ":libcurl_private_no_format-nonliteral",
+    ":libcurl_private_no_strict-overflow",
+  ]
+  all_dependent_configs = [ ":libcurl_config" ]
+  sources = [
+    "$libcurl_root/lib/mprintf.c",
+    "$libcurl_root/lib/content_encoding.c",
+    "$libcurl_root/lib/progress.c",
+  ]
+}
+
+source_set("libcurl") {
+  deps = [
+    ":maybe_curl_config.h",
+    ":libcurl_vtls",
+    ":libcurl_warnings_suppressed",
+    "//src/gn/vendor/skia/zlib",
+  ]
+  configs += [ ":libcurl_private_config" ]
+  sources = [
+    # From lib/Makefile.inc, copy/paste LIB_CFILES into bash.
+    # Remove spaces around '=' and add double quotes:
+    # LIB_CFILES="file.c ... altsvc.c"
+    # Execute that, then execute this:
+    # for a in $LIB_CFILES; do echo "    \"\$libcurl_root/lib/$a\","; done
+    "$libcurl_root/lib/file.c",
+    "$libcurl_root/lib/timeval.c",
+    "$libcurl_root/lib/base64.c",
+    "$libcurl_root/lib/hostip.c",
+    "$libcurl_root/lib/formdata.c",
+    "$libcurl_root/lib/cookie.c",
+    "$libcurl_root/lib/http.c",
+    "$libcurl_root/lib/sendf.c",
+    "$libcurl_root/lib/ftp.c",
+    "$libcurl_root/lib/url.c",
+    "$libcurl_root/lib/dict.c",
+    "$libcurl_root/lib/if2ip.c",
+    "$libcurl_root/lib/speedcheck.c",
+    "$libcurl_root/lib/ldap.c",
+    "$libcurl_root/lib/version.c",
+    "$libcurl_root/lib/getenv.c",
+    "$libcurl_root/lib/escape.c",
+    "$libcurl_root/lib/telnet.c",
+    "$libcurl_root/lib/netrc.c",
+    "$libcurl_root/lib/getinfo.c",
+    "$libcurl_root/lib/transfer.c",
+    "$libcurl_root/lib/strcase.c",
+    "$libcurl_root/lib/easy.c",
+    "$libcurl_root/lib/security.c",
+    "$libcurl_root/lib/curl_fnmatch.c",
+    "$libcurl_root/lib/fileinfo.c",
+    "$libcurl_root/lib/ftplistparser.c",
+    "$libcurl_root/lib/wildcard.c",
+    "$libcurl_root/lib/krb5.c",
+    "$libcurl_root/lib/memdebug.c",
+    "$libcurl_root/lib/http_chunks.c",
+    "$libcurl_root/lib/strtok.c",
+    "$libcurl_root/lib/connect.c",
+    "$libcurl_root/lib/llist.c",
+    "$libcurl_root/lib/hash.c",
+    "$libcurl_root/lib/multi.c",
+    "$libcurl_root/lib/share.c",
+    "$libcurl_root/lib/http_digest.c",
+    "$libcurl_root/lib/md4.c",
+    "$libcurl_root/lib/md5.c",
+    "$libcurl_root/lib/http_negotiate.c",
+    "$libcurl_root/lib/inet_pton.c",
+    "$libcurl_root/lib/strtoofft.c",
+    "$libcurl_root/lib/strerror.c",
+    "$libcurl_root/lib/amigaos.c",
+    "$libcurl_root/lib/hostasyn.c",
+    "$libcurl_root/lib/hostip4.c",
+    "$libcurl_root/lib/hostip6.c",
+    "$libcurl_root/lib/hostsyn.c",
+    "$libcurl_root/lib/inet_ntop.c",
+    "$libcurl_root/lib/parsedate.c",
+    "$libcurl_root/lib/select.c",
+    "$libcurl_root/lib/tftp.c",
+    "$libcurl_root/lib/splay.c",
+    "$libcurl_root/lib/strdup.c",
+    "$libcurl_root/lib/socks.c",
+    "$libcurl_root/lib/ssh.c",
+    "$libcurl_root/lib/ssh-libssh.c",
+    "$libcurl_root/lib/curl_addrinfo.c",
+    "$libcurl_root/lib/socks_gssapi.c",
+    "$libcurl_root/lib/socks_sspi.c",
+    "$libcurl_root/lib/curl_sspi.c",
+    "$libcurl_root/lib/slist.c",
+    "$libcurl_root/lib/nonblock.c",
+    "$libcurl_root/lib/curl_memrchr.c",
+    "$libcurl_root/lib/imap.c",
+    "$libcurl_root/lib/pop3.c",
+    "$libcurl_root/lib/smtp.c",
+    "$libcurl_root/lib/pingpong.c",
+    "$libcurl_root/lib/rtsp.c",
+    "$libcurl_root/lib/curl_threads.c",
+    "$libcurl_root/lib/warnless.c",
+    "$libcurl_root/lib/hmac.c",
+    "$libcurl_root/lib/curl_rtmp.c",
+    "$libcurl_root/lib/openldap.c",
+    "$libcurl_root/lib/curl_gethostname.c",
+    "$libcurl_root/lib/gopher.c",
+    "$libcurl_root/lib/idn_win32.c",
+    "$libcurl_root/lib/http_proxy.c",
+    "$libcurl_root/lib/non-ascii.c",
+    "$libcurl_root/lib/asyn-ares.c",
+    "$libcurl_root/lib/asyn-thread.c",
+    "$libcurl_root/lib/curl_gssapi.c",
+    "$libcurl_root/lib/http_ntlm.c",
+    "$libcurl_root/lib/curl_ntlm_wb.c",
+    "$libcurl_root/lib/curl_ntlm_core.c",
+    "$libcurl_root/lib/curl_sasl.c",
+    "$libcurl_root/lib/rand.c",
+    "$libcurl_root/lib/curl_multibyte.c",
+    "$libcurl_root/lib/hostcheck.c",
+    "$libcurl_root/lib/conncache.c",
+    "$libcurl_root/lib/dotdot.c",
+    "$libcurl_root/lib/x509asn1.c",
+    "$libcurl_root/lib/http2.c",
+    "$libcurl_root/lib/smb.c",
+    "$libcurl_root/lib/curl_endian.c",
+    "$libcurl_root/lib/curl_des.c",
+    "$libcurl_root/lib/system_win32.c",
+    "$libcurl_root/lib/mime.c",
+    "$libcurl_root/lib/sha256.c",
+    "$libcurl_root/lib/setopt.c",
+    "$libcurl_root/lib/curl_path.c",
+    "$libcurl_root/lib/curl_ctype.c",
+    "$libcurl_root/lib/curl_range.c",
+    "$libcurl_root/lib/psl.c",
+    "$libcurl_root/lib/doh.c",
+    "$libcurl_root/lib/urlapi.c",
+    "$libcurl_root/lib/curl_get_line.c",
+    "$libcurl_root/lib/altsvc.c",
+  ]
+}

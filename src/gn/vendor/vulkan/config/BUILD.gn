@@ -1,0 +1,218 @@
+# Copyright 2017-2018 the Volcano Authors. All rights reserved.
+# Licensed under the GPL v3.
+#
+# configs in a separate subdir can be referenced from the main BUILD.gn.
+import("//src/gn/toolchain/win/settings.gni")
+import("../../subgnDefines.gni")
+import("../vulkan-args.gni")
+
+config("vulkan_config") {
+  include_dirs = [
+    "$vk_gen_include_dir",
+    "$vk_gen_include_dir/vulkan",
+    "$vulklayers",
+  ]
+  if (is_win) {
+    defines = [
+      "VK_USE_PLATFORM_WIN32_KHR",
+      "VK_USE_PLATFORM_WIN32_KHX",
+      "WIN32_LEAN_AND_MEAN",
+      "_HAS_EXCEPTIONS=0", # disable exceptions in STL
+      "_CRT_SECURE_NO_WARNINGS",
+    ]
+    if (!use_dynamic_crt) {
+      defines += [ "_STATIC_CPPLIB" ] # also needed to disable exceptions
+    }
+  } else if (is_android) {
+    defines = [
+      "ANDROID",
+      "VK_USE_PLATFORM_ANDROID_KHR",
+      "VK_USE_PLATFORM_ANDROID_KHX",
+    ]
+    cflags = [
+      "-ffunction-sections",
+      "-funwind-tables",
+      "-no-canonical-prefixes",
+      "-Wa,--noexecstack",
+    ]
+    ldflags = [
+      "-Wl,--build-id",
+      "-Wl,-z,noexecstack",
+      "-Wl,-z,relro",
+      "-Wl,-z,now",
+      "-Wl,--warn-shared-textrel",
+      "-Wl,--fatal-warnings",
+      # -Wl,--no-undefined is in src/gn/config/android/BUILD.gn
+    ]
+    include_dirs += [
+      "$vulkheader/include",
+      # for vulkan_wrapper.h:
+      "$android_ndk_root/sources/third_party/vulkan/src",
+    ]
+  } else if (is_mac || is_ios || is_tvos) {
+    defines = [ "VK_USE_PLATFORM_MACOS_MVK" ]
+    ldflags = [ "-Wl,-rpath,@loader_path/" ]
+  } else if (is_linux) {
+    defines = []
+    if (is_xcb_enabled) {
+      defines += [
+        "VK_USE_PLATFORM_XCB_KHR",
+        "VK_USE_PLATFORM_XCB_KHX",
+      ]
+    }
+    if (is_xlib_enabled) {
+      defines += [
+        "VK_USE_PLATFORM_XLIB_KHR",
+        "VK_USE_PLATFORM_XLIB_KHX",
+        "VK_USE_PLATFORM_XLIB_XRANDR_EXT",
+      ]
+    }
+    if (is_wayland_enabled) {
+      defines += [
+        "VK_USE_PLATFORM_WAYLAND_KHR",
+        "VK_USE_PLATFORM_WAYLAND_KHX",
+      ]
+    }
+  } else {
+    assert(false, "Unsupported current_os=$current_os")
+  }
+  defines += [ "VULKAN_CONFIG_DEFINED" ]
+}
+
+config("vulkan_private_config") {
+  defines = [
+    "API_NAME=\"Vulkan\"",
+    # silence: vk_layer_logging.h:361:54: error: expected ')' before 'PRIx64'
+    "__STDC_FORMAT_MACROS",
+    # validation layers rely on vulkanmemoryallocator. Configure it here.
+    "VMA_USE_STL_SHARED_MUTEX=0",
+  ]
+  if (is_debug) {
+    defines += [ "DEBUG" ]
+  }
+
+  posix_cflags = [
+    "-Wno-missing-field-initializers",
+    "-Wno-unused-parameter",
+    "-Wpointer-arith",
+    "-fno-builtin-memcmp",
+    "-fno-strict-aliasing",
+    "-fvisibility=hidden",
+  ]
+  if (is_clang) {
+    posix_cflags += [
+      "-Wno-typedef-redefinition",
+    ]
+  } else {
+    if (gcc_version >= 70000) {
+      posix_cflags += [
+        "-Wimplicit-fallthrough=0",
+        "-Wno-stringop-truncation",
+        "-Wno-stringop-overflow",
+      ]
+    }
+  }
+  posix_dir_defines = [
+    "FALLBACK_CONFIG_DIRS=\"/etc/xdg\"",
+    "FALLBACK_DATA_DIRS=\"/usr/local/share:/usr/share\"",
+    "SYSCONFDIR=\"/etc\"",
+  ]
+  if (is_win) {
+    not_needed([ "posix_cflags", "posix_dir_defines" ])
+    cflags = [
+      # /GR-: Disable RTTI
+      "/GR-",
+      # /w34456: Warn about nested declarations
+      "/w34456",
+      # /w34701, /w34703: Warn about potentially uninitialized variables
+      "/w34701", "/w34703",
+      # /w34057: Warn about different indirection types.
+      "/w34057",
+      # /w34245: Warn about signed/unsigned mismatch.
+      "/w34245",
+      # /bigobj: avoid C1128: number of sections exceeded object file format
+      "/bigobj",
+    ]
+  } else if (is_mac || is_ios || is_tvos) {
+    cflags = posix_cflags
+    defines += posix_dir_defines
+  } else if (is_android || is_linux || is_posix) {
+    cflags = posix_cflags
+    defines += posix_dir_defines
+    # loader/loader.c has #if defined(__APPLE__) to add bundle's Resources dir
+    # this does the same thing, but for non-Apple builds.
+    defines += [
+      "EXTRASYSCONFDIR=\"/" + rebase_path(root_out_dir, "/") + "\"",
+    ]
+  } else {
+    assert(false, "Unsupported platform.")
+  }
+}
+
+config("vulkan_layer_config") {
+  if (is_win) {
+  } else if (is_mac || is_ios || is_tvos) {
+  } else {  # Linux:
+    # Pass these flags to the linker:
+    # -Bsymbolic: resolve symbols first from within the library
+    #   (this prevents i.e. vkGetInstanceProcAddr from the loader
+    #    from replacing the vkGetInstanceProcAddr defined in a layer)
+    # --exclude-libs ALL: do not automatically export any symbols at
+    #    all. Only if a symbol is explicitly exported will it be
+    #    exported from the .so file.
+    ldflags = [
+      "-Wl,-Bsymbolic,--exclude-libs,ALL",
+    ]
+  }
+}
+
+config("vulkan_import_lib") {
+  ldflags = [ "vulkan-1.dll.lib" ]
+}
+config("private_config_include_dir_layers_generated") {
+  include_dirs = [
+    "$vulklayers/layers",
+    "$vulklayers/layers/generated",
+  ]
+}
+config("format-nonliteral") {
+  if (!is_win) {
+    cflags = [ "-Wno-format-nonliteral" ]
+  }
+}
+config("maybe-uninitialized") {
+  if (!is_win && !is_clang) {
+    cflags = [ "-Wno-maybe-uninitialized" ]
+  }
+}
+config("unused-function") {
+  if (!is_win) {
+    cflags = [ "-Wno-unused-function" ]
+  }
+}
+config("sign-compare") {
+  if (!is_win) {
+    cflags = [ "-Wno-sign-compare" ]
+  }
+}
+
+config("include_spirv_tools_from_skia") {
+  include_dirs = [
+    "$vulkloader/../skia/third_party/externals/spirv-tools/include",
+  ]
+}
+
+config("cereal_config") {
+  include_dirs = [ "$cereal_dir/include" ]
+  defines = [ "CEREAL_THREAD_SAFE=1" ]
+  libs = [ "pthread" ]
+}
+
+group("layer-configs") {
+  public_configs = [
+    ":private_config_include_dir_layers_generated",
+    ":vulkan_private_config",
+    ":vulkan_layer_config",
+    ":vulkan_config",
+  ]
+}

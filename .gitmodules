@@ -1,0 +1,32 @@
+[submodule "vendor/vulkan-headers"]
+	path = vendor/vulkan-headers
+	url = https://github.com/KhronosGroup/Vulkan-Headers
+[submodule "vendor/vulkan-loader"]
+	path = vendor/vulkan-loader
+	url = https://github.com/KhronosGroup/Vulkan-Loader
+	ignore = dirty
+[submodule "vendor/vulkan-validationlayers"]
+	path = vendor/vulkan-validationlayers
+	url = https://github.com/KhronosGroup/Vulkan-ValidationLayers
+	ignore = dirty
+[submodule "vendor/spirv_cross"]
+	path = vendor/spirv_cross
+	url = https://github.com/KhronosGroup/SPIRV-Cross
+	ignore = dirty
+[submodule "vendor/glslang"]
+	path = vendor/glslang
+	url = https://github.com/KhronosGroup/glslang.git
+	ignore = dirty
+[submodule "vendor/glfw"]
+	path = vendor/glfw
+	url = https://github.com/ndsol/glfwplusandroid
+[submodule "vendor/skia"]
+	path = vendor/skia
+	url = https://github.com/ndsol/subskia
+[submodule "vendor/subgn"]
+	path = vendor/subgn
+	url = https://github.com/ndsol/subgn
+[submodule "vendor/cereal"]
+	path = vendor/cereal
+	url = https://github.com/USCiLab/cereal
+	ignore = dirty
